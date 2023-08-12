@@ -49,7 +49,7 @@ enum Sexp<'a> {
 }
 
 impl<'a> Sexp<'a> {
-    // `tokens` must not be empty
+    /// Should never be empty.
     fn parse(
         tokens: &mut std::iter::Peekable<impl Iterator<Item = Token<'a>>>,
     ) -> Result<Sexp<'a>, String> {
@@ -145,17 +145,18 @@ pub enum Type {
     Int,
     /// The type of floating-point numbers (`f64` in `egglog`).
     Float,
+    /// An uninterpreted sort.
+    Sort(String),
 }
 
 impl Type {
     fn parse(sexp: &Sexp) -> Result<Type, String> {
         match sexp {
             Sexp::List(_, list) if list.is_empty() => Ok(Type::Unit),
+            Sexp::List(token, _) => Err(format!("expected type, found {token}")),
             Sexp::Atom(token) if token.as_str() == "i64" => Ok(Type::Int),
             Sexp::Atom(token) if token.as_str() == "f64" => Ok(Type::Float),
-            Sexp::Atom(token) | Sexp::List(token, _) => {
-                Err(format!("expected type, found {token}"))
-            }
+            Sexp::Atom(token) => Ok(Type::Sort(token.as_str().to_owned())),
         }
     }
 }
@@ -166,6 +167,7 @@ impl Display for Type {
             Type::Unit => write!(f, "()"),
             Type::Int => write!(f, "i64"),
             Type::Float => write!(f, "f64"),
+            Type::Sort(s) => write!(f, "{s}"),
         }
     }
 }
@@ -178,8 +180,28 @@ pub enum Action<'a> {
 }
 
 impl<'a> Action<'a> {
-    fn parse(_sexps: &[Sexp]) -> Result<Action<'a>, String> {
-        todo!()
+    fn parse(sexp: Sexp<'a>) -> Result<Action<'a>, String> {
+        match sexp {
+            Sexp::List(token, list) => match list.get(0) {
+                Some(Sexp::Atom(action)) => match action.as_str() {
+                    "set" => match list.as_slice() {
+                        [_, Sexp::Atom(f), Sexp::List(_, xs), y] => Ok(Action::Insert(
+                            token,
+                            f.as_str().to_owned(),
+                            xs.iter().map(Expr::parse).collect::<Result<_, _>>()?,
+                            Expr::parse(y)?,
+                        )),
+                        _ => Err(format!("expected `set` action, found {token}")),
+                    },
+                    f => match list[1..].iter().map(Expr::parse).collect::<Result<_, _>>() {
+                        Ok(xs) => Ok(Action::Insert(token, f.to_owned(), xs, Expr::Unit)),
+                        Err(_) => Err(format!("expected action, found {token}")),
+                    },
+                },
+                _ => Err(format!("expected action, found {token}")),
+            },
+            Sexp::Atom(token) => Err(format!("expected action, found {token}")),
+        }
     }
 }
 
@@ -203,8 +225,16 @@ impl Display for Action<'_> {
 pub struct Pattern(Vec<Expr>);
 
 impl Pattern {
-    fn parse(_sexp: &Sexp) -> Result<Pattern, String> {
-        todo!()
+    fn parse(sexp: &Sexp) -> Result<Pattern, String> {
+        match sexp {
+            Sexp::List(_, list) => match list.as_slice() {
+                [Sexp::Atom(eq), rest @ ..] if eq.as_str() == "=" => Ok(Pattern(
+                    rest.iter().map(Expr::parse).collect::<Result<_, _>>()?,
+                )),
+                _ => Ok(Pattern(vec![Expr::parse(sexp)?])),
+            },
+            Sexp::Atom(_) => Ok(Pattern(vec![Expr::parse(sexp)?])),
+        }
     }
 }
 
@@ -247,7 +277,7 @@ pub enum Command<'a> {
 impl<'a> Command<'a> {
     fn parse(sexp: Sexp<'a>) -> Result<Command<'a>, String> {
         match sexp {
-            Sexp::List(token, list) => match list.get(0) {
+            Sexp::List(token, mut list) => match list.get(0) {
                 Some(Sexp::Atom(command)) => match command.as_str() {
                     "sort" => match list.as_slice() {
                         [_, Sexp::Atom(sort)] => Ok(Command::Sort(token, sort.as_str().to_owned())),
@@ -263,21 +293,19 @@ impl<'a> Command<'a> {
                         _ => Err(format!("expected `function` command, found {token}")),
                     },
                     "rule" => match list.as_slice() {
-                        [_, Sexp::List(_, patterns), Sexp::List(_, actions)] => Ok(Command::Rule(
+                        [_, Sexp::List(_, patterns), Sexp::List(..)] => Ok(Command::Rule(
                             token,
                             patterns
                                 .iter()
                                 .map(Pattern::parse)
                                 .collect::<Result<_, _>>()?,
-                            actions
-                                .iter()
-                                .map(|sexp| match sexp {
-                                    Sexp::List(_, list) => Action::parse(list),
-                                    Sexp::Atom(token) => {
-                                        Err(format!("expected an action but found {token}"))
-                                    }
-                                })
-                                .collect::<Result<_, _>>()?,
+                            match list.remove(2) {
+                                Sexp::List(_, actions) => actions
+                                    .into_iter()
+                                    .map(Action::parse)
+                                    .collect::<Result<_, _>>()?,
+                                Sexp::Atom(_) => unreachable!(),
+                            },
                         )),
                         _ => Err(format!("expeted `rule` command, found {token}")),
                     },
@@ -289,7 +317,7 @@ impl<'a> Command<'a> {
                         [_, expr] => Ok(Command::Check(token, Expr::parse(expr)?)),
                         _ => Err(format!("expeted `check` command, found {token}")),
                     },
-                    _ => Ok(Command::Action(Action::parse(&list)?)),
+                    _ => Ok(Command::Action(Action::parse(Sexp::List(token, list))?)),
                 },
                 _ => Err(format!("expected command, found {token}")),
             },
