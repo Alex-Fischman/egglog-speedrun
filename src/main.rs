@@ -1,10 +1,10 @@
 //! The command line interface for egglog.
 
-#![deny(missing_docs)]
-#![deny(clippy::missing_docs_in_private_items)]
 #![deny(clippy::pedantic)]
-#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::range_plus_one)]
+#![deny(missing_docs)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 
 pub mod database;
 pub mod syntax;

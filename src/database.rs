@@ -4,10 +4,15 @@ use crate::syntax::*;
 use std::collections::HashMap;
 use std::hash::Hash;
 
+/// A single value in an `egglog` program.
 pub enum Value {
+    /// The single element of the `Unit` type.
     Unit,
+    /// An integer.
     Int(i64),
+    /// A floating-point number.
     Float(f64),
+    /// An element of an uninterpreted sort.
     Sort(u64),
 }
 
@@ -22,16 +27,42 @@ impl Display for Value {
     }
 }
 
+/// A compressed representation of a `Value`.
+/// The schema for the `Table` contains the information needed to recover the `Value`.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 struct Data([u8; 8]);
 
+impl From<&Value> for Data {
+    fn from(value: &Value) -> Data {
+        match value {
+            Value::Unit => Data::default(),
+            Value::Int(i) => Data(i.to_le_bytes()),
+            Value::Float(f) => Data(f.to_le_bytes()),
+            Value::Sort(u) => Data(u.to_le_bytes()),
+        }
+    }
+}
+
+impl From<(&Data, &Type)> for Value {
+    fn from((data, t): (&Data, &Type)) -> Value {
+        match t {
+            Type::Unit => Value::Unit,
+            Type::Int => Value::Int(i64::from_le_bytes(data.0)),
+            Type::Float => Value::Float(f64::from_le_bytes(data.0)),
+            Type::Sort(_) => Value::Sort(u64::from_le_bytes(data.0)),
+        }
+    }
+}
+
+/// Can hold a small number of values without allocating.
+/// Otherwise, falls back to a `Vec`.
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum Array<T> {
     Arr(usize, [T; ARRAY_SIZE]),
     Vec(Vec<T>),
 }
 
-const ARRAY_SIZE: usize = 4;
+const ARRAY_SIZE: usize = 3;
 
 impl<T: Default> From<Vec<T>> for Array<T> {
     fn from(vec: Vec<T>) -> Array<T> {
@@ -65,31 +96,18 @@ impl<T> Array<T> {
     }
 }
 
+/// A single function in an `egglog` program.
 pub struct Table {
     schema: (Array<Type>, Type),
-    hashed: HashMap<Array<Data>, usize>,
+    hashed: HashMap<Array<Data>, Row>,
     linear: Vec<(Array<Data>, Data)>,
 }
 
+/// A wrapper around an index into `Table::linear`.
+#[derive(Clone, Copy)]
+pub struct Row(usize);
+
 impl Table {
-    fn value_to_data(value: &Value) -> Data {
-        match value {
-            Value::Unit => Data::default(),
-            Value::Int(i) => Data(i.to_le_bytes()),
-            Value::Float(f) => Data(f.to_le_bytes()),
-            Value::Sort(u) => Data(u.to_le_bytes()),
-        }
-    }
-
-    fn data_to_value(data: Data, t: &Type) -> Value {
-        match t {
-            Type::Unit => Value::Unit,
-            Type::Int => Value::Int(i64::from_le_bytes(data.0)),
-            Type::Float => Value::Float(f64::from_le_bytes(data.0)),
-            Type::Sort(_) => Value::Sort(u64::from_le_bytes(data.0)),
-        }
-    }
-
     fn does_query_match_schema(&self, query: &[Value]) -> Result<(), String> {
         if query.len() != self.schema.0.len() {
             return Err(format!(
@@ -107,6 +125,7 @@ impl Table {
         })
     }
 
+    /// Create a new `Table` with the given schema.
     #[must_use]
     pub fn new(inputs: Vec<Type>, output: Type) -> Table {
         Table {
@@ -116,35 +135,44 @@ impl Table {
         }
     }
 
-    pub fn get_hashed(&self, inputs: &[Value]) -> Result<Option<usize>, String> {
+    /// Get the index of a row in the table given its inputs.
+    pub fn get_hashed(&self, inputs: &[Value]) -> Result<Option<Row>, String> {
         self.does_query_match_schema(inputs)?;
 
-        let inputs = Array::from(inputs.iter().map(Table::value_to_data).collect::<Vec<_>>());
+        let inputs = Array::from(inputs.iter().map(Data::from).collect::<Vec<_>>());
 
         Ok(self.hashed.get(&inputs).copied())
     }
 
+    /// Get a row in the table given its index.
     #[must_use]
-    pub fn get_linear(&self, row: usize) -> Option<(Vec<Value>, Value)> {
-        self.linear.get(row).map(|t| {
+    pub fn get_linear(&self, row: Row) -> Option<(Vec<Value>, Value)> {
+        self.linear.get(row.0).map(|t| {
             (
                 t.0.iter()
                     .zip(self.schema.0.iter())
-                    .map(|t| Table::data_to_value(*t.0, t.1))
+                    .map(Value::from)
                     .collect(),
-                Table::data_to_value(t.1, &self.schema.1),
+                (&t.1, &self.schema.1).into(),
             )
         })
     }
 
+    /// Add a row to the table, using the merge function
+    /// if a row with the given inputs already exists.
     pub fn insert(&mut self, inputs: &[Value], output: &Value) -> Result<(), String> {
         self.does_query_match_schema(inputs)?;
 
-        let inputs = Array::from(inputs.iter().map(Table::value_to_data).collect::<Vec<_>>());
-        let output = Table::value_to_data(output);
+        let inputs = Array::from(inputs.iter().map(Data::from).collect::<Vec<_>>());
+        let output = output.into();
 
-        self.hashed.insert(inputs.clone(), self.linear.len());
-        self.linear.push((inputs, output));
+        match self.hashed.get(&inputs) {
+            None => {
+                self.hashed.insert(inputs.clone(), Row(self.linear.len()));
+                self.linear.push((inputs, output));
+            }
+            Some(_row) => todo!(), // *old = merge(old, output)
+        }
 
         Ok(())
     }
