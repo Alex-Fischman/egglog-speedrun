@@ -6,8 +6,8 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 
-pub mod database;
 pub mod syntax;
+pub mod table;
 
 fn main() {
     match run() {
