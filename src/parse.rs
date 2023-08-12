@@ -99,21 +99,23 @@ pub enum Expr {
 impl Expr {
     fn parse(sexp: &Sexp) -> Result<Expr, String> {
         match sexp {
-            Sexp::List(_, list) if list.is_empty() => Ok(Expr::Unit),
-            Sexp::Atom(token) if token.as_str().parse::<i64>().is_ok() => {
-                Ok(Expr::Int(token.as_str().parse::<i64>().unwrap()))
-            }
-            Sexp::Atom(token) if token.as_str().parse::<f64>().is_ok() => {
-                Ok(Expr::Float(token.as_str().parse::<f64>().unwrap()))
-            }
-            Sexp::Atom(token) => Err(format!("expected expression, found {token}")),
             Sexp::List(token, list) => match list.as_slice() {
+                [] => Ok(Expr::Unit),
                 [Sexp::Atom(f), xs @ ..] => Ok(Expr::Call(
                     f.as_str().to_owned(),
                     xs.iter().map(Expr::parse).collect::<Result<_, _>>()?,
                 )),
                 _ => Err(format!("expected expression, found {token}")),
             },
+            Sexp::Atom(token) => {
+                if let Ok(i) = token.as_str().parse::<i64>() {
+                    Ok(Expr::Int(i))
+                } else if let Ok(f) = token.as_str().parse::<f64>() {
+                    Ok(Expr::Float(f))
+                } else {
+                    Ok(Expr::Var(token.as_str().to_owned()))
+                }
+            }
         }
     }
 }
@@ -292,6 +294,15 @@ impl<'a> Command<'a> {
                         )),
                         _ => Err(format!("expected `function` command, found {token}")),
                     },
+                    "relation" => match list.as_slice() {
+                        [_, Sexp::Atom(f), Sexp::List(_, xs)] => Ok(Command::Function(
+                            token,
+                            f.as_str().to_owned(),
+                            xs.iter().map(Type::parse).collect::<Result<_, _>>()?,
+                            Type::Unit,
+                        )),
+                        _ => Err(format!("expected `relation` command, found {token}")),
+                    },
                     "rule" => match list.as_slice() {
                         [_, Sexp::List(_, patterns), Sexp::List(..)] => Ok(Command::Rule(
                             token,
@@ -340,7 +351,7 @@ impl Display for Command<'_> {
             ),
             Command::Rule(_, ps, qs) => write!(
                 f,
-                "(rule {} {})",
+                "(rule ({}) ({}))",
                 ps.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
