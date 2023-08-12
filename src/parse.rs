@@ -118,6 +118,25 @@ impl Expr {
     }
 }
 
+impl Display for Expr {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Expr::Unit => write!(f, "()"),
+            Expr::Int(i) => write!(f, "{i}"),
+            Expr::Float(f_) => write!(f, "{f_}"),
+            Expr::Call(f_, xs) => write!(
+                f,
+                "({f_} {})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Expr::Var(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 /// The type of an `Expr`.
 pub enum Type {
     /// The unit type.
@@ -141,6 +160,16 @@ impl Type {
     }
 }
 
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Type::Unit => write!(f, "()"),
+            Type::Int => write!(f, "i64"),
+            Type::Float => write!(f, "f64"),
+        }
+    }
+}
+
 /// An action, either as a top-level `Command` or in the head of a rule.
 /// Each variant holds a `Token` for error reporting.
 pub enum Action<'a> {
@@ -154,12 +183,46 @@ impl<'a> Action<'a> {
     }
 }
 
+impl Display for Action<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Action::Insert(_, f_, xs, y) => write!(
+                f,
+                "(set ({f_} {}) {y})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        }
+    }
+}
+
 /// An assertion of equality among expressions.
+/// Should never be empty.
 pub struct Pattern(Vec<Expr>);
 
 impl Pattern {
     fn parse(_sexp: &Sexp) -> Result<Pattern, String> {
         todo!()
+    }
+}
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        if self.0.len() == 1 {
+            write!(f, "{}", self.0[0])
+        } else {
+            write!(
+                f,
+                "(= {})",
+                self.0
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        }
     }
 }
 
@@ -239,7 +302,29 @@ impl Display for Command<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Command::Sort(_, sort) => write!(f, "(sort {sort})"),
-            _ => todo!(),
+            Command::Function(_, f_, xs, y) => write!(
+                f,
+                "(function {f_} ({}) {y})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Command::Rule(_, ps, qs) => write!(
+                f,
+                "(rule {} {})",
+                ps.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                qs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Command::Run(_) => write!(f, "(run)"),
+            Command::Check(_, x) => write!(f, "(check {x})"),
+            Command::Action(q) => write!(f, "{q}"),
         }
     }
 }
