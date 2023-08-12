@@ -140,8 +140,10 @@ impl Display for Expr {
 }
 
 /// The type of an `Expr`.
+#[derive(Default)]
 pub enum Type {
     /// The unit type.
+    #[default]
     Unit,
     /// The type of integers (`i64` in `egglog`).
     Int,
@@ -369,8 +371,6 @@ impl Display for Command<'_> {
 }
 
 /// Parse a source string into an `egglog` program.
-/// # Errors
-/// Will return an error if the source text could not be parsed.
 pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     // split source text into tokens
     let mut tokens: Vec<(Token, bool)> = vec![];

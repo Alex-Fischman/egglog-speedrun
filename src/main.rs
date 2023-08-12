@@ -1,11 +1,12 @@
 //! The command line interface for egglog.
 
-// Force clippy to be annoying, then remove bad lints.
 #![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
 #![deny(clippy::pedantic)]
-// RangeInclusive doesn't work for `Token`s.
+#![allow(clippy::missing_errors_doc)]
 #![allow(clippy::range_plus_one)]
 
+pub mod database;
 pub mod syntax;
 
 fn main() {
