@@ -76,11 +76,16 @@ impl Display for Type {
 impl Value {
     /// Asserts that this `Value` has the given `Type`.
     pub fn assert_type(&self, t: &Type) -> Result<(), String> {
-        match (t, self) {
-            (Type::Unit, Value::Unit)
-            | (Type::Int, Value::Int(_))
-            | (Type::Sort(_), Value::Sort(_)) => Ok(()),
-            (t, v) => Err(format!("expected {t}, found {v}")),
+        // we could do all this by matching on a tuple, but we
+        // wouldn't get type errors when adding new `Value` variants
+        if match self {
+            Value::Unit => matches!(t, Type::Unit),
+            Value::Int(_) => matches!(t, Type::Int),
+            Value::Sort(_) => matches!(t, Type::Sort(_)),
+        } {
+            Ok(())
+        } else {
+            Err(format!("expected {t}, found {self}"))
         }
     }
 }

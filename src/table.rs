@@ -12,21 +12,18 @@ pub struct Table {
 
 impl Table {
     fn match_inputs(&self, inputs: &[Value]) -> Result<(), String> {
-        if inputs.len() != self.inputs.len() {
-            return Err(format!(
+        if inputs.len() == self.inputs.len() {
+            for (t, v) in self.inputs.iter().zip(inputs) {
+                v.assert_type(t)?;
+            }
+            Ok(())
+        } else {
+            Err(format!(
                 "expected {} inputs, found {} inputs",
                 self.inputs.len(),
                 inputs.len()
-            ));
+            ))
         }
-        self.inputs
-            .iter()
-            .zip(inputs)
-            .try_for_each(|(t, v)| v.assert_type(t))
-    }
-
-    fn match_output(&self, output: Value) -> Result<(), String> {
-        output.assert_type(&self.output)
     }
 
     /// Create a new `Table` with the given schema.
@@ -47,7 +44,7 @@ impl Table {
         match self.data.get(inputs) {
             None => Err(String::from("unknown output")),
             Some(&output) => {
-                self.match_output(output)?;
+                output.assert_type(&self.output)?;
                 Ok(output)
             }
         }
@@ -56,7 +53,7 @@ impl Table {
     /// Add a row to the table, merging if a row with the given inputs already exists.
     pub fn insert(&mut self, inputs: &[Value], output: Value) -> Result<(), String> {
         self.match_inputs(inputs)?;
-        self.match_output(output)?;
+        output.assert_type(&self.output)?;
         match self.data.get_mut(inputs) {
             None => {
                 self.data.insert(inputs.to_vec(), output);
