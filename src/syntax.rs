@@ -328,28 +328,38 @@ impl<'a> Sexp<'a> {
 pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     // split source text into tokens
     let mut tokens: Vec<(Token, bool)> = vec![];
+    let mut in_line_comment = false;
     for (i, c) in source.text.char_indices() {
-        match c {
-            '(' | ')' => tokens.push((
-                #[allow(clippy::range_plus_one)]
-                Token {
-                    source,
-                    range: i..i + 1,
-                },
-                false,
-            )),
-            c if c.is_whitespace() => {}
-            _ => match tokens.last_mut() {
-                Some((token, is_atom)) if token.range.end == i && *is_atom => token.range.end += 1,
-                _ => tokens.push((
+        if in_line_comment {
+            if c == '\n' {
+                in_line_comment = false;
+            }
+        } else {
+            match c {
+                ';' => in_line_comment = true,
+                '(' | ')' => tokens.push((
                     #[allow(clippy::range_plus_one)]
                     Token {
                         source,
                         range: i..i + 1,
                     },
-                    true,
+                    false,
                 )),
-            },
+                c if c.is_whitespace() => {}
+                _ => match tokens.last_mut() {
+                    Some((token, is_atom)) if *is_atom && token.range.end == i => {
+                        token.range.end += 1;
+                    }
+                    _ => tokens.push((
+                        #[allow(clippy::range_plus_one)]
+                        Token {
+                            source,
+                            range: i..i + 1,
+                        },
+                        true,
+                    )),
+                },
+            }
         }
     }
 
