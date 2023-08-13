@@ -221,12 +221,10 @@ impl<'a> Sexp<'a> {
             Sexp::List(token, list) => match list.get(0) {
                 Some(Sexp::Atom(action)) => match action.as_str() {
                     "set" => match list.as_slice() {
-                        [_, Sexp::Atom(f), Sexp::List(_, xs), y] => Ok(Action::Insert(
-                            token,
-                            f.as_str().to_owned(),
-                            xs.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
-                            y.to_expr()?,
-                        )),
+                        [_, call, y] => match call.to_expr()? {
+                            Expr::Call(f, xs) => Ok(Action::Insert(token, f, xs, y.to_expr()?)),
+                            _ => Err(format!("expected `set` action, found {token}")),
+                        },
                         _ => Err(format!("expected `set` action, found {token}")),
                     },
                     f => match list[1..]
