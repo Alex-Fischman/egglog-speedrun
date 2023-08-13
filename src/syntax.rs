@@ -205,7 +205,7 @@ pub enum Command<'a> {
     /// Create a new uninterpreted sort.
     Sort(Token<'a>, String),
     /// Create a new function.
-    Function(Token<'a>, String, Vec<Type>, Type),
+    Function(Token<'a>, String, Vec<Type>, Type, Expr),
     /// Create a rule, which performs the actions in the `head`
     /// if all the patterns in the `body` are matched.
     Rule(Token<'a>, Vec<Pattern>, Vec<Action<'a>>),
@@ -227,12 +227,30 @@ impl<'a> Command<'a> {
                         _ => Err(format!("expected `sort` command, found {token}")),
                     },
                     "function" => match list.as_slice() {
-                        [_, Sexp::Atom(f), Sexp::List(_, xs), y] => Ok(Command::Function(
-                            token,
-                            f.as_str().to_owned(),
-                            xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
-                            y.to_type()?,
-                        )),
+                        [_, Sexp::Atom(f), Sexp::List(_, xs), y] => {
+                            let f = f.as_str().to_owned();
+                            let xs = xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?;
+                            let y = y.to_type()?;
+                            let merge = match &y {
+                                Type::Unit => Expr::Unit,
+                                Type::Sort(_) => todo!("union"),
+                                Type::Int => {
+                                    return Err(format!("missing merge function for {token}"))
+                                }
+                            };
+                            Ok(Command::Function(token, f, xs, y, merge))
+                        }
+                        [_, Sexp::Atom(f), Sexp::List(_, xs), y, Sexp::Atom(merge), expr]
+                            if merge.as_str() == ":merge" =>
+                        {
+                            Ok(Command::Function(
+                                token,
+                                f.as_str().to_owned(),
+                                xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
+                                y.to_type()?,
+                                expr.to_expr()?,
+                            ))
+                        }
                         _ => Err(format!("expected `function` command, found {token}")),
                     },
                     "relation" => match list.as_slice() {
@@ -241,6 +259,7 @@ impl<'a> Command<'a> {
                             f.as_str().to_owned(),
                             xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
                             Type::Unit,
+                            Expr::Unit,
                         )),
                         _ => Err(format!("expected `relation` command, found {token}")),
                     },
@@ -282,9 +301,9 @@ impl Display for Command<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Command::Sort(_, sort) => write!(f, "(sort {sort})"),
-            Command::Function(_, f_, xs, y) => write!(
+            Command::Function(_, f_, xs, y, merge) => write!(
                 f,
-                "(function {f_} ({}) {y})",
+                "(function {f_} ({}) {y} :merge {merge})",
                 xs.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
