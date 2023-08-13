@@ -7,6 +7,7 @@ pub struct Table {
     schema: (Vec<Type>, Type),
     hashed: HashMap<Vec<Value>, Row>,
     linear: Vec<(Vec<Value>, Value)>,
+    merger: Expr,
 }
 
 /// A wrapper around an index into `Table::linear`.
@@ -32,11 +33,12 @@ impl Table {
 
     /// Create a new `Table` with the given schema.
     #[must_use]
-    pub fn new(inputs: Vec<Type>, output: Type) -> Table {
+    pub fn new(inputs: Vec<Type>, output: Type, merger: Expr) -> Table {
         Table {
             schema: (inputs, output),
             hashed: HashMap::default(),
             linear: Vec::default(),
+            merger,
         }
     }
 
@@ -60,7 +62,12 @@ impl Table {
                 self.hashed.insert(inputs.to_vec(), Row(self.linear.len()));
                 self.linear.push((inputs.to_vec(), output));
             }
-            Some(_row) => todo!("merge"),
+            Some(row) => {
+                self.linear[row.0].1 = self.merger.evaluate(&HashMap::from([
+                    (String::from("old"), self.linear[row.0].1),
+                    (String::from("new"), output),
+                ]))?;
+            }
         }
         Ok(())
     }
