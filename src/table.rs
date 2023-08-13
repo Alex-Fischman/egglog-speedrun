@@ -6,7 +6,7 @@ use crate::*;
 pub struct Table {
     inputs: Vec<Type>,
     output: Type,
-    merge: Expr,
+    merge: Option<Expr>,
     data: HashMap<Vec<Value>, Value>,
 }
 
@@ -28,7 +28,7 @@ impl Table {
 
     /// Create a new `Table` with the given schema.
     #[must_use]
-    pub fn new(inputs: Vec<Type>, output: Type, merge: Expr) -> Table {
+    pub fn new(inputs: Vec<Type>, output: Type, merge: Option<Expr>) -> Table {
         let data = HashMap::new();
         Table {
             inputs,
@@ -58,11 +58,20 @@ impl Table {
             None => {
                 self.data.insert(inputs.to_vec(), output);
             }
-            Some(old) => {
-                let vars =
-                    HashMap::from([(String::from("old"), *old), (String::from("new"), output)]);
-                *old = self.merge.evaluate(&vars, &HashMap::new())?;
-            }
+            Some(old) => match (&self.merge, &self.output) {
+                (Some(merge), _) => {
+                    *old = merge.evaluate(
+                        &HashMap::from([
+                            (String::from("old"), *old),
+                            (String::from("new"), output),
+                        ]),
+                        &HashMap::new(),
+                    )?;
+                }
+                (None, Type::Unit) => {}
+                (None, Type::Sort(_)) => todo!("union"),
+                (None, Type::Int) => return Err(String::from("missing merge function")),
+            },
         }
         Ok(())
     }

@@ -97,8 +97,9 @@ impl Display for Action<'_> {
 pub enum Command<'a> {
     /// Create a new uninterpreted sort.
     Sort(Token<'a>, String),
-    /// Create a new function.
-    Function(Token<'a>, String, Vec<Type>, Type, Expr),
+    /// Create a new function, with a name, input types,
+    /// an output type, and possibly a merge expression.
+    Function(Token<'a>, String, Vec<Type>, Type, Option<Expr>),
     /// Create a rule, which performs the actions in the `head`
     /// if all the patterns in the `body` are matched.
     Rule(Token<'a>, Vec<Pattern>, Vec<Action<'a>>),
@@ -114,14 +115,18 @@ impl Display for Command<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Command::Sort(_, sort) => write!(f, "(sort {sort})"),
-            Command::Function(_, f_, xs, y, merge) => write!(
-                f,
-                "(function {f_} ({}) {y} :merge {merge})",
-                xs.iter()
+            Command::Function(_, f_, xs, y, merge) => {
+                let xs = xs
+                    .iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
-                    .join(" ")
-            ),
+                    .join(" ");
+                write!(f, "(function {f_} ({xs}) {y}")?;
+                if let Some(merge) = merge {
+                    write!(f, " :merge {merge}")?;
+                }
+                write!(f, ")")
+            }
             Command::Rule(_, ps, qs) => write!(
                 f,
                 "(rule ({}) ({}))",
@@ -252,29 +257,26 @@ impl<'a> Sexp<'a> {
                         _ => Err(format!("expected `sort` command, found {token}")),
                     },
                     "function" => match list.as_slice() {
-                        [_, Sexp::Atom(f), Sexp::List(_, xs), y] => {
+                        [_, Sexp::Atom(f), Sexp::List(_, xs), y, options @ ..] => {
                             let f = f.as_str().to_owned();
                             let xs = xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?;
                             let y = y.to_type()?;
-                            let merge = match &y {
-                                Type::Unit => Expr::Unit,
-                                Type::Sort(_) => todo!("union"),
-                                Type::Int => {
-                                    return Err(format!("missing merge function for {token}"))
+                            let mut merge = None;
+                            for option in options.chunks(2) {
+                                let key = match &option[0] {
+                                    Sexp::Atom(token) => token,
+                                    Sexp::List(token, _) => {
+                                        return Err(format!("unknown option {token}"))
+                                    }
+                                };
+                                let value =
+                                    option.get(1).ok_or(format!("missing value for {token}"))?;
+                                match key.as_str() {
+                                    ":merge" => merge = Some(value.to_expr()?),
+                                    _ => return Err(format!("unknown option {key}")),
                                 }
-                            };
+                            }
                             Ok(Command::Function(token, f, xs, y, merge))
-                        }
-                        [_, Sexp::Atom(f), Sexp::List(_, xs), y, Sexp::Atom(merge), expr]
-                            if merge.as_str() == ":merge" =>
-                        {
-                            Ok(Command::Function(
-                                token,
-                                f.as_str().to_owned(),
-                                xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
-                                y.to_type()?,
-                                expr.to_expr()?,
-                            ))
                         }
                         _ => Err(format!("expected `function` command, found {token}")),
                     },
@@ -284,7 +286,7 @@ impl<'a> Sexp<'a> {
                             f.as_str().to_owned(),
                             xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
                             Type::Unit,
-                            Expr::Unit,
+                            None,
                         )),
                         _ => Err(format!("expected `relation` command, found {token}")),
                     },
