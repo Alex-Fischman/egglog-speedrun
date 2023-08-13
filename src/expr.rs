@@ -73,6 +73,18 @@ impl Display for Type {
     }
 }
 
+impl Value {
+    /// Asserts that this `Value` has the given `Type`.
+    pub fn assert_type(&self, t: &Type) -> Result<(), String> {
+        match (t, self) {
+            (Type::Unit, Value::Unit)
+            | (Type::Int, Value::Int(_))
+            | (Type::Sort(_), Value::Sort(_)) => Ok(()),
+            (t, v) => Err(format!("expected {t}, found {v}")),
+        }
+    }
+}
+
 impl Expr {
     /// Get a `Value` from an `Expr` under a given context.
     pub fn evaluate(
@@ -96,13 +108,11 @@ impl Expr {
                 ("add", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
                 _ => match funcs.get(f) {
-                    Some(func) => Ok(func
-                        .get_output(
-                            &xs.iter()
-                                .map(|x| x.evaluate(vars, funcs))
-                                .collect::<Result<Vec<_>, _>>()?,
-                        )?
-                        .unwrap()),
+                    Some(func) => Ok(func.get(
+                        &xs.iter()
+                            .map(|x| x.evaluate(vars, funcs))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )?),
                     None => Err(format!("unknown function {self}")),
                 },
             },
