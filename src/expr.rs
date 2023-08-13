@@ -1,7 +1,6 @@
 //! This module defines an interpreter for `egglog` expressions.
 
-pub use std::collections::HashMap;
-pub use std::fmt::{Display, Formatter, Result as FmtResult};
+use crate::*;
 
 /// An `egglog` expression.
 pub enum Expr {
@@ -76,8 +75,12 @@ impl Display for Type {
 
 impl Expr {
     /// Get a `Value` from an `Expr` under a given context.
-    pub fn evaluate(&self, context: &HashMap<String, Value>) -> Result<Value, String> {
-        let int = |expr: &Expr| match expr.evaluate(context)? {
+    pub fn evaluate(
+        &self,
+        vars: &HashMap<String, Value>,
+        funcs: &HashMap<String, Table>,
+    ) -> Result<Value, String> {
+        let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
             Value::Int(i) => Ok(i),
             v => Err(format!("expected {}, found {v}", Type::Int)),
         };
@@ -85,14 +88,23 @@ impl Expr {
         match self {
             Expr::Unit => Ok(Value::Unit),
             Expr::Int(i) => Ok(Value::Int(*i)),
-            Expr::Var(s) => match context.get(s) {
+            Expr::Var(s) => match vars.get(s) {
                 Some(v) => Ok(*v),
                 None => Err(format!("unknown variable {self}")),
             },
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
                 ("add", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
-                _ => Err(format!("unknown function {self}")),
+                _ => match funcs.get(f) {
+                    Some(func) => Ok(func
+                        .get_output(
+                            &xs.iter()
+                                .map(|x| x.evaluate(vars, funcs))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        )?
+                        .unwrap()),
+                    None => Err(format!("unknown function {self}")),
+                },
             },
         }
     }

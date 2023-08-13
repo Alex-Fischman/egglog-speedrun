@@ -1,6 +1,6 @@
 //! This module parses source strings into `egglog` programs.
 
-pub use crate::expr::*;
+use crate::*;
 
 /// A `Source` represents a string to be parsed, as well as a name to be used in error messages.
 pub struct Source {

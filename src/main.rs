@@ -9,7 +9,9 @@ pub mod expr;
 pub mod syntax;
 pub mod table;
 
-pub use crate::{syntax::*, table::*};
+pub use crate::{expr::*, syntax::*, table::*};
+pub use std::collections::HashMap;
+pub use std::fmt::{Display, Formatter, Result as FmtResult};
 
 fn main() {
     match run() {
@@ -64,7 +66,9 @@ impl<'a> State<'a> {
             }
             Command::Rule(_, patterns, actions) => self.rules.push((patterns, actions)),
             Command::Run(_) => self.run_fixpoint(),
-            Command::Check(token, expr) => println!("{token}: {}", expr.evaluate(&empty)?),
+            Command::Check(token, expr) => {
+                println!("{token}: {}", expr.evaluate(&empty, &self.funcs)?);
+            }
             Command::Action(action) => self.run_action(&action)?,
         }
         Ok(())
@@ -74,15 +78,15 @@ impl<'a> State<'a> {
         let empty = HashMap::new();
         match action {
             Action::Insert(_, f, xs, y) => {
+                let xs = xs
+                    .iter()
+                    .map(|x| x.evaluate(&empty, &self.funcs))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let y = y.evaluate(&empty, &self.funcs)?;
                 self.funcs
                     .get_mut(f)
                     .ok_or(format!("unknown function {f}"))?
-                    .insert(
-                        &xs.iter()
-                            .map(|x| x.evaluate(&empty))
-                            .collect::<Result<Vec<_>, _>>()?,
-                        y.evaluate(&empty)?,
-                    )?;
+                    .insert(&xs, y)?;
             }
         }
         Ok(())

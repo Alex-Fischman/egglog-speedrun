@@ -1,6 +1,6 @@
 //! This module defines the representation of a `function` in `egglog`.
 
-pub use crate::expr::*;
+use crate::*;
 
 /// A single function in an `egglog` program.
 pub struct Table {
@@ -54,6 +54,17 @@ impl Table {
         self.linear.get(row.0)
     }
 
+    /// Get the output of a row in the table given its inputs.
+    pub fn get_output(&self, inputs: &[Value]) -> Result<Option<Value>, String> {
+        match self.get_hashed(inputs)? {
+            None => Ok(None),
+            Some(row) => match self.get_linear(row) {
+                None => unreachable!(),
+                Some((_, output)) => Ok(Some(*output)),
+            },
+        }
+    }
+
     /// Add a row to the table, merging if a row with the given inputs already exists.
     pub fn insert(&mut self, inputs: &[Value], output: Value) -> Result<(), String> {
         self.does_query_match_schema(inputs)?;
@@ -63,10 +74,11 @@ impl Table {
                 self.linear.push((inputs.to_vec(), output));
             }
             Some(row) => {
-                self.linear[row.0].1 = self.merger.evaluate(&HashMap::from([
+                let vars = HashMap::from([
                     (String::from("old"), self.linear[row.0].1),
                     (String::from("new"), output),
-                ]))?;
+                ]);
+                self.linear[row.0].1 = self.merger.evaluate(&vars, &HashMap::new())?;
             }
         }
         Ok(())
