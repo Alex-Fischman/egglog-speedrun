@@ -1,7 +1,6 @@
 //! The command line interface for egglog.
 
 #![deny(clippy::pedantic)]
-#![allow(clippy::range_plus_one)]
 #![deny(missing_docs)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]

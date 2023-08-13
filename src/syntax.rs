@@ -48,6 +48,99 @@ enum Sexp<'a> {
     List(Token<'a>, Vec<Sexp<'a>>),
 }
 
+/// An assertion of equality among expressions.
+/// Should never be empty.
+pub struct Pattern(pub Vec<Expr>);
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        if self.0.len() == 1 {
+            write!(f, "{}", self.0[0])
+        } else {
+            write!(
+                f,
+                "(= {})",
+                self.0
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        }
+    }
+}
+
+/// An action, either as a top-level `Command` or in the head of a rule.
+/// Each variant holds a `Token` for error reporting.
+pub enum Action<'a> {
+    /// Add a row to table `f`, merging if necessary.
+    Insert(Token<'a>, String, Vec<Expr>, Expr),
+}
+
+impl Display for Action<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Action::Insert(_, f_, xs, y) => write!(
+                f,
+                "(set ({f_} {}) {y})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        }
+    }
+}
+
+/// A top-level command.
+/// Each variant holds a `Token` for error reporting.
+pub enum Command<'a> {
+    /// Create a new uninterpreted sort.
+    Sort(Token<'a>, String),
+    /// Create a new function.
+    Function(Token<'a>, String, Vec<Type>, Type, Expr),
+    /// Create a rule, which performs the actions in the `head`
+    /// if all the patterns in the `body` are matched.
+    Rule(Token<'a>, Vec<Pattern>, Vec<Action<'a>>),
+    /// Run the `egglog` program.
+    Run(Token<'a>),
+    /// Get the value of a given `Expr`.
+    Check(Token<'a>, Expr),
+    /// Run an action.
+    Action(Action<'a>),
+}
+
+impl Display for Command<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Command::Sort(_, sort) => write!(f, "(sort {sort})"),
+            Command::Function(_, f_, xs, y, merge) => write!(
+                f,
+                "(function {f_} ({}) {y} :merge {merge})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Command::Rule(_, ps, qs) => write!(
+                f,
+                "(rule ({}) ({}))",
+                ps.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                qs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Command::Run(_) => write!(f, "(run)"),
+            Command::Check(_, x) => write!(f, "(check {x})"),
+            Command::Action(q) => write!(f, "{q}"),
+        }
+    }
+}
+
 impl<'a> Sexp<'a> {
     /// Should never be empty.
     fn parse(
@@ -109,18 +202,22 @@ impl<'a> Sexp<'a> {
             Sexp::Atom(token) => Ok(Type::Sort(token.as_str().to_owned())),
         }
     }
-}
 
-/// An action, either as a top-level `Command` or in the head of a rule.
-/// Each variant holds a `Token` for error reporting.
-pub enum Action<'a> {
-    /// Add a row to table `f`, merging if necessary.
-    Insert(Token<'a>, String, Vec<Expr>, Expr),
-}
+    fn to_pattern(&self) -> Result<Pattern, String> {
+        match self {
+            Sexp::List(_, list) => match list.as_slice() {
+                [Sexp::Atom(eq), rest @ ..] if eq.as_str() == "=" => Ok(Pattern(
+                    rest.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
+                )),
+                _ => Ok(Pattern(vec![self.to_expr()?])),
+            },
+            Sexp::Atom(_) => Ok(Pattern(vec![self.to_expr()?])),
+        }
+    }
 
-impl<'a> Action<'a> {
-    fn parse(sexp: Sexp<'a>) -> Result<Action<'a>, String> {
-        match sexp {
+    #[allow(clippy::wrong_self_convention)]
+    fn to_action(self) -> Result<Action<'a>, String> {
+        match self {
             Sexp::List(token, list) => match list.get(0) {
                 Some(Sexp::Atom(action)) => match action.as_str() {
                     "set" => match list.as_slice() {
@@ -146,80 +243,10 @@ impl<'a> Action<'a> {
             Sexp::Atom(token) => Err(format!("expected action, found {token}")),
         }
     }
-}
 
-impl Display for Action<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    #[allow(clippy::wrong_self_convention)]
+    fn to_command(self) -> Result<Command<'a>, String> {
         match self {
-            Action::Insert(_, f_, xs, y) => write!(
-                f,
-                "(set ({f_} {}) {y})",
-                xs.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-        }
-    }
-}
-
-/// An assertion of equality among expressions.
-/// Should never be empty.
-pub struct Pattern(pub Vec<Expr>);
-
-impl Pattern {
-    fn parse(sexp: &Sexp) -> Result<Pattern, String> {
-        match sexp {
-            Sexp::List(_, list) => match list.as_slice() {
-                [Sexp::Atom(eq), rest @ ..] if eq.as_str() == "=" => Ok(Pattern(
-                    rest.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
-                )),
-                _ => Ok(Pattern(vec![sexp.to_expr()?])),
-            },
-            Sexp::Atom(_) => Ok(Pattern(vec![sexp.to_expr()?])),
-        }
-    }
-}
-
-impl Display for Pattern {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        if self.0.len() == 1 {
-            write!(f, "{}", self.0[0])
-        } else {
-            write!(
-                f,
-                "(= {})",
-                self.0
-                    .iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        }
-    }
-}
-
-/// A top-level command.
-/// Each variant holds a `Token` for error reporting.
-pub enum Command<'a> {
-    /// Create a new uninterpreted sort.
-    Sort(Token<'a>, String),
-    /// Create a new function.
-    Function(Token<'a>, String, Vec<Type>, Type, Expr),
-    /// Create a rule, which performs the actions in the `head`
-    /// if all the patterns in the `body` are matched.
-    Rule(Token<'a>, Vec<Pattern>, Vec<Action<'a>>),
-    /// Run the `egglog` program.
-    Run(Token<'a>),
-    /// Get the value of a given `Expr`.
-    Check(Token<'a>, Expr),
-    /// Run an action.
-    Action(Action<'a>),
-}
-
-impl<'a> Command<'a> {
-    fn parse(sexp: Sexp<'a>) -> Result<Command<'a>, String> {
-        match sexp {
             Sexp::List(token, mut list) => match list.get(0) {
                 Some(Sexp::Atom(command)) => match command.as_str() {
                     "sort" => match list.as_slice() {
@@ -268,12 +295,12 @@ impl<'a> Command<'a> {
                             token,
                             patterns
                                 .iter()
-                                .map(Pattern::parse)
+                                .map(Sexp::to_pattern)
                                 .collect::<Result<_, _>>()?,
                             match list.remove(2) {
                                 Sexp::List(_, actions) => actions
                                     .into_iter()
-                                    .map(Action::parse)
+                                    .map(Sexp::to_action)
                                     .collect::<Result<_, _>>()?,
                                 Sexp::Atom(_) => unreachable!(),
                             },
@@ -288,42 +315,11 @@ impl<'a> Command<'a> {
                         [_, expr] => Ok(Command::Check(token, expr.to_expr()?)),
                         _ => Err(format!("expeted `check` command, found {token}")),
                     },
-                    _ => Ok(Command::Action(Action::parse(Sexp::List(token, list))?)),
+                    _ => Ok(Command::Action(Sexp::List(token, list).to_action()?)),
                 },
                 _ => Err(format!("expected command, found {token}")),
             },
             Sexp::Atom(token) => Err(format!("expected command, found {token}")),
-        }
-    }
-}
-
-impl Display for Command<'_> {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Command::Sort(_, sort) => write!(f, "(sort {sort})"),
-            Command::Function(_, f_, xs, y, merge) => write!(
-                f,
-                "(function {f_} ({}) {y} :merge {merge})",
-                xs.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-            Command::Rule(_, ps, qs) => write!(
-                f,
-                "(rule ({}) ({}))",
-                ps.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                qs.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-            Command::Run(_) => write!(f, "(run)"),
-            Command::Check(_, x) => write!(f, "(check {x})"),
-            Command::Action(q) => write!(f, "{q}"),
         }
     }
 }
@@ -335,6 +331,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     for (i, c) in source.text.char_indices() {
         match c {
             '(' | ')' => tokens.push((
+                #[allow(clippy::range_plus_one)]
                 Token {
                     source,
                     range: i..i + 1,
@@ -345,6 +342,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
             _ => match tokens.last_mut() {
                 Some((token, is_atom)) if token.range.end == i && *is_atom => token.range.end += 1,
                 _ => tokens.push((
+                    #[allow(clippy::range_plus_one)]
                     Token {
                         source,
                         range: i..i + 1,
@@ -363,5 +361,5 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     }
 
     // translate sexps into commands
-    sexps.into_iter().map(Command::parse).collect()
+    sexps.into_iter().map(Sexp::to_command).collect()
 }
