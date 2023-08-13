@@ -88,12 +88,10 @@ pub enum Expr {
     Unit,
     /// An integer.
     Int(i64),
-    /// A floating-point number.
-    Float(f64),
-    /// A table lookup.
-    Call(String, Vec<Expr>),
     /// A reference to a variable.
     Var(String),
+    /// A table lookup.
+    Call(String, Vec<Expr>),
 }
 
 impl Expr {
@@ -110,8 +108,6 @@ impl Expr {
             Sexp::Atom(token) => {
                 if let Ok(i) = token.as_str().parse::<i64>() {
                     Ok(Expr::Int(i))
-                } else if let Ok(f) = token.as_str().parse::<f64>() {
-                    Ok(Expr::Float(f))
                 } else {
                     Ok(Expr::Var(token.as_str().to_owned()))
                 }
@@ -125,7 +121,7 @@ impl Display for Expr {
         match self {
             Expr::Unit => write!(f, "()"),
             Expr::Int(i) => write!(f, "{i}"),
-            Expr::Float(f_) => write!(f, "{f_}"),
+            Expr::Var(s) => write!(f, "{s}"),
             Expr::Call(f_, xs) => write!(
                 f,
                 "({f_} {})",
@@ -134,21 +130,16 @@ impl Display for Expr {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Expr::Var(s) => write!(f, "{s}"),
         }
     }
 }
 
 /// The type of an `Expr`.
-#[derive(Default)]
 pub enum Type {
     /// The unit type.
-    #[default]
     Unit,
     /// The type of integers (`i64` in `egglog`).
     Int,
-    /// The type of floating-point numbers (`f64` in `egglog`).
-    Float,
     /// An uninterpreted sort.
     Sort(String),
 }
@@ -159,7 +150,6 @@ impl Type {
             Sexp::List(_, list) if list.is_empty() => Ok(Type::Unit),
             Sexp::List(token, _) => Err(format!("expected type, found {token}")),
             Sexp::Atom(token) if token.as_str() == "i64" => Ok(Type::Int),
-            Sexp::Atom(token) if token.as_str() == "f64" => Ok(Type::Float),
             Sexp::Atom(token) => Ok(Type::Sort(token.as_str().to_owned())),
         }
     }
@@ -170,7 +160,6 @@ impl Display for Type {
         match self {
             Type::Unit => write!(f, "()"),
             Type::Int => write!(f, "i64"),
-            Type::Float => write!(f, "f64"),
             Type::Sort(s) => write!(f, "{s}"),
         }
     }
