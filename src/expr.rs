@@ -73,3 +73,27 @@ impl Display for Type {
         }
     }
 }
+
+impl Expr {
+    /// Get a `Value` from an `Expr` under a given context.
+    pub fn evaluate(&self, context: &HashMap<String, Value>) -> Result<Value, String> {
+        let int = |expr: &Expr| match expr.evaluate(context)? {
+            Value::Int(i) => Ok(i),
+            v => Err(format!("expected {}, found {v}", Type::Int)),
+        };
+        let ints = |exprs: &[Expr]| exprs.iter().map(int).collect::<Result<Vec<_>, _>>();
+        match self {
+            Expr::Unit => Ok(Value::Unit),
+            Expr::Int(i) => Ok(Value::Int(*i)),
+            Expr::Var(s) => match context.get(s) {
+                Some(v) => Ok(*v),
+                None => Err(format!("unknown variable {self}")),
+            },
+            Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
+                ("add", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
+                ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
+                _ => Err(format!("unknown function {self}")),
+            },
+        }
+    }
+}

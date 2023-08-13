@@ -17,16 +17,16 @@ impl Table {
     fn does_query_match_schema(&self, query: &[Value]) -> Result<(), String> {
         if query.len() != self.schema.0.len() {
             return Err(format!(
-                "query length {} did not match schema length {}",
-                query.len(),
-                self.schema.0.len()
+                "expected {}, found {}",
+                self.schema.0.len(),
+                query.len()
             ));
         }
         self.schema.0.iter().zip(query).try_for_each(|t| match t {
             (Type::Unit, Value::Unit)
             | (Type::Int, Value::Int(_))
             | (Type::Sort(_), Value::Sort(_)) => Ok(()),
-            (t, q) => Err(format!("query value {q} did not match schema type {t}")),
+            (t, q) => Err(format!("expected {t}, found {q}")),
         })
     }
 
