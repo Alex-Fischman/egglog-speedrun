@@ -1,28 +1,6 @@
-//! This module defines the backend for `egglog`.
+//! This module defines the representation of a `function` in `egglog`.
 
-use crate::syntax::*;
-use std::collections::HashMap;
-
-/// A single value in an `egglog` program.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Value {
-    /// The single element of the `Unit` type.
-    Unit,
-    /// An integer.
-    Int(i64),
-    /// An element of an uninterpreted sort.
-    Sort(u64),
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Value::Unit => write!(f, "()"),
-            Value::Int(v) => write!(f, "{v}"),
-            Value::Sort(v) => write!(f, "{v}"),
-        }
-    }
-}
+pub use crate::expr::*;
 
 /// A single function in an `egglog` program.
 pub struct Table {
@@ -74,8 +52,7 @@ impl Table {
         self.linear.get(row.0)
     }
 
-    /// Add a row to the table, using the merge function
-    /// if a row with the given inputs already exists.
+    /// Add a row to the table, merging if a row with the given inputs already exists.
     pub fn insert(&mut self, inputs: &[Value], output: Value) -> Result<(), String> {
         self.does_query_match_schema(inputs)?;
         match self.hashed.get(inputs) {
@@ -83,7 +60,7 @@ impl Table {
                 self.hashed.insert(inputs.to_vec(), Row(self.linear.len()));
                 self.linear.push((inputs.to_vec(), output));
             }
-            Some(_row) => todo!(),
+            Some(_row) => todo!("merge"),
         }
         Ok(())
     }

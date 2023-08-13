@@ -1,6 +1,6 @@
 //! This module parses source strings into `egglog` programs.
 
-pub use std::fmt::{Display, Formatter, Result as FmtResult};
+pub use crate::expr::*;
 
 /// A `Source` represents a string to be parsed, as well as a name to be used in error messages.
 pub struct Source {
@@ -80,28 +80,14 @@ impl<'a> Sexp<'a> {
             _ => Ok(Sexp::Atom(token)),
         }
     }
-}
 
-/// A single value in the abtract syntax tree.
-pub enum Expr {
-    /// The unit value.
-    Unit,
-    /// An integer.
-    Int(i64),
-    /// A reference to a variable.
-    Var(String),
-    /// A table lookup.
-    Call(String, Vec<Expr>),
-}
-
-impl Expr {
-    fn parse(sexp: &Sexp) -> Result<Expr, String> {
-        match sexp {
+    fn to_expr(&self) -> Result<Expr, String> {
+        match self {
             Sexp::List(token, list) => match list.as_slice() {
                 [] => Ok(Expr::Unit),
                 [Sexp::Atom(f), xs @ ..] => Ok(Expr::Call(
                     f.as_str().to_owned(),
-                    xs.iter().map(Expr::parse).collect::<Result<_, _>>()?,
+                    xs.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
                 )),
                 _ => Err(format!("expected expression, found {token}")),
             },
@@ -114,53 +100,13 @@ impl Expr {
             }
         }
     }
-}
 
-impl Display for Expr {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn to_type(&self) -> Result<Type, String> {
         match self {
-            Expr::Unit => write!(f, "()"),
-            Expr::Int(i) => write!(f, "{i}"),
-            Expr::Var(s) => write!(f, "{s}"),
-            Expr::Call(f_, xs) => write!(
-                f,
-                "({f_} {})",
-                xs.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-        }
-    }
-}
-
-/// The type of an `Expr`.
-pub enum Type {
-    /// The unit type.
-    Unit,
-    /// The type of integers (`i64` in `egglog`).
-    Int,
-    /// An uninterpreted sort.
-    Sort(String),
-}
-
-impl Type {
-    fn parse(sexp: &Sexp) -> Result<Type, String> {
-        match sexp {
             Sexp::List(_, list) if list.is_empty() => Ok(Type::Unit),
             Sexp::List(token, _) => Err(format!("expected type, found {token}")),
             Sexp::Atom(token) if token.as_str() == "i64" => Ok(Type::Int),
             Sexp::Atom(token) => Ok(Type::Sort(token.as_str().to_owned())),
-        }
-    }
-}
-
-impl Display for Type {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Type::Unit => write!(f, "()"),
-            Type::Int => write!(f, "i64"),
-            Type::Sort(s) => write!(f, "{s}"),
         }
     }
 }
@@ -181,12 +127,16 @@ impl<'a> Action<'a> {
                         [_, Sexp::Atom(f), Sexp::List(_, xs), y] => Ok(Action::Insert(
                             token,
                             f.as_str().to_owned(),
-                            xs.iter().map(Expr::parse).collect::<Result<_, _>>()?,
-                            Expr::parse(y)?,
+                            xs.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
+                            y.to_expr()?,
                         )),
                         _ => Err(format!("expected `set` action, found {token}")),
                     },
-                    f => match list[1..].iter().map(Expr::parse).collect::<Result<_, _>>() {
+                    f => match list[1..]
+                        .iter()
+                        .map(Sexp::to_expr)
+                        .collect::<Result<_, _>>()
+                    {
                         Ok(xs) => Ok(Action::Insert(token, f.to_owned(), xs, Expr::Unit)),
                         Err(_) => Err(format!("expected action, found {token}")),
                     },
@@ -215,18 +165,18 @@ impl Display for Action<'_> {
 
 /// An assertion of equality among expressions.
 /// Should never be empty.
-pub struct Pattern(Vec<Expr>);
+pub struct Pattern(pub Vec<Expr>);
 
 impl Pattern {
     fn parse(sexp: &Sexp) -> Result<Pattern, String> {
         match sexp {
             Sexp::List(_, list) => match list.as_slice() {
                 [Sexp::Atom(eq), rest @ ..] if eq.as_str() == "=" => Ok(Pattern(
-                    rest.iter().map(Expr::parse).collect::<Result<_, _>>()?,
+                    rest.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
                 )),
-                _ => Ok(Pattern(vec![Expr::parse(sexp)?])),
+                _ => Ok(Pattern(vec![sexp.to_expr()?])),
             },
-            Sexp::Atom(_) => Ok(Pattern(vec![Expr::parse(sexp)?])),
+            Sexp::Atom(_) => Ok(Pattern(vec![sexp.to_expr()?])),
         }
     }
 }
@@ -280,8 +230,8 @@ impl<'a> Command<'a> {
                         [_, Sexp::Atom(f), Sexp::List(_, xs), y] => Ok(Command::Function(
                             token,
                             f.as_str().to_owned(),
-                            xs.iter().map(Type::parse).collect::<Result<_, _>>()?,
-                            Type::parse(y)?,
+                            xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
+                            y.to_type()?,
                         )),
                         _ => Err(format!("expected `function` command, found {token}")),
                     },
@@ -289,7 +239,7 @@ impl<'a> Command<'a> {
                         [_, Sexp::Atom(f), Sexp::List(_, xs)] => Ok(Command::Function(
                             token,
                             f.as_str().to_owned(),
-                            xs.iter().map(Type::parse).collect::<Result<_, _>>()?,
+                            xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
                             Type::Unit,
                         )),
                         _ => Err(format!("expected `relation` command, found {token}")),
@@ -316,7 +266,7 @@ impl<'a> Command<'a> {
                         _ => Err(format!("expeted `run` command, found {token}")),
                     },
                     "check" => match list.as_slice() {
-                        [_, expr] => Ok(Command::Check(token, Expr::parse(expr)?)),
+                        [_, expr] => Ok(Command::Check(token, expr.to_expr()?)),
                         _ => Err(format!("expeted `check` command, found {token}")),
                     },
                     _ => Ok(Command::Action(Action::parse(Sexp::List(token, list))?)),
