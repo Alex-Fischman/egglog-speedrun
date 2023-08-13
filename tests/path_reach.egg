@@ -2,7 +2,7 @@
 (relation path (i64 i64))
 
 (rule ((edge x y)) ((path x y)))
-(rule ((path x y) (edge y z)) ((path x z)))
+(rule ((path x y) (edge y z)) ((path x y)))
 
 (edge 1 2)
 (edge 2 3)
