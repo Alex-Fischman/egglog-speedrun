@@ -58,6 +58,16 @@ pub enum Value {
     Sort(u64),
 }
 
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        match self {
+            Value::Unit => write!(f, "()"),
+            Value::Int(i) => write!(f, "{i}"),
+            Value::Sort(s) => write!(f, "s{s}"),
+        }
+    }
+}
+
 /// An `egglog` type.
 pub enum Type {
     /// The unit type.
