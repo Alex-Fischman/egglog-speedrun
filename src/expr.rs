@@ -48,7 +48,7 @@ impl Display for Expr {
 }
 
 /// An `egglog` value.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Value {
     /// The unit value.
     Unit,
@@ -56,16 +56,6 @@ pub enum Value {
     Int(i64),
     /// An element of an uninterpreted sort.
     Sort(u64),
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match self {
-            Value::Unit => write!(f, "()"),
-            Value::Int(v) => write!(f, "{v}"),
-            Value::Sort(v) => write!(f, "{v}"),
-        }
-    }
 }
 
 /// An `egglog` type.
@@ -100,7 +90,7 @@ impl Value {
         } {
             Ok(())
         } else {
-            Err(format!("expected {t}, found {self}"))
+            Err(format!("expected {t}, found {self:?}"))
         }
     }
 }
@@ -114,7 +104,7 @@ impl Expr {
     ) -> Result<Value, String> {
         let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
             Value::Int(i) => Ok(i),
-            v => Err(format!("expected {}, found {v}", Type::Int)),
+            v => Err(format!("expected {}, found {v:?}", Type::Int)),
         };
         let ints = |exprs: &[Expr]| exprs.iter().map(int).collect::<Result<Vec<_>, _>>();
         match self {
