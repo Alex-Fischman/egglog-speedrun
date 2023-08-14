@@ -148,7 +148,7 @@ impl<'a> Sexp<'a> {
             ")" => Err(format!("extra {token}")),
             "(" => {
                 let start = token.range.start;
-                let mut list = vec![];
+                let mut list = Vec::new();
                 loop {
                     match tokens.peek() {
                         None => return Err(format!("extra {token}")),
@@ -370,7 +370,7 @@ impl<'a> Sexp<'a> {
 /// Parse a source string into an `egglog` program.
 pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     // split source text into tokens
-    let mut tokens: Vec<(Token, bool)> = vec![];
+    let mut tokens: Vec<(Token, bool)> = Vec::new();
     let mut in_line_comment = false;
     for (i, c) in source.text.char_indices() {
         if in_line_comment {
@@ -407,7 +407,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     }
 
     // parse token stream into sexps
-    let mut sexps = vec![];
+    let mut sexps = Vec::new();
     let mut tokens = tokens.into_iter().map(|(token, _)| token).peekable();
     while tokens.peek().is_some() {
         sexps.push(Sexp::parse(&mut tokens)?);
