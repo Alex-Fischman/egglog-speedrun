@@ -6,18 +6,18 @@ use crate::*;
 pub struct Source {
     /// The name of this `Source`, to be used in error messages.
     pub name: String,
-    /// The text of this `Source`, to be used in `Token`s.
+    /// The text of this `Source`, to be used in `Slice`s.
     pub text: String,
 }
 
 /// A slice of a `Source` string.
-pub struct Token<'a> {
+pub struct Slice<'a> {
     /// The `Source` that this token comes from.
     pub source: &'a Source,
     range: std::ops::Range<usize>,
 }
 
-impl Token<'_> {
+impl Slice<'_> {
     /// Get the string slice that this token holds.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -25,7 +25,7 @@ impl Token<'_> {
     }
 }
 
-impl Display for Token<'_> {
+impl Display for Slice<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         let mut row = 1;
         let mut col = 1;
@@ -44,8 +44,8 @@ impl Display for Token<'_> {
 }
 
 enum Sexp<'a> {
-    Atom(Token<'a>),
-    List(Token<'a>, Vec<Sexp<'a>>),
+    Atom(Slice<'a>),
+    List(Slice<'a>, Vec<Sexp<'a>>),
 }
 
 /// A pattern to match on in the body of a `Command::Rule`.
@@ -63,10 +63,10 @@ impl Display for Pattern {
 }
 
 /// An action, either as a top-level `Command` or in the head of a `Command::Rule`.
-/// Each variant holds a `Token` for error reporting.
+/// Each variant holds a `Slice` for error reporting.
 pub enum Action<'a> {
     /// Add a row to table `f`, merging if necessary.
-    Insert(Token<'a>, String, Vec<Expr>, Expr),
+    Insert(Slice<'a>, String, Vec<Expr>, Expr),
 }
 
 impl Display for Action<'_> {
@@ -85,20 +85,20 @@ impl Display for Action<'_> {
 }
 
 /// A top-level command.
-/// Each variant holds a `Token` for error reporting.
+/// Each variant holds a `Slice` for error reporting.
 pub enum Command<'a> {
     /// Create a new uninterpreted sort.
-    Sort(Token<'a>, String),
+    Sort(Slice<'a>, String),
     /// Create a new function, with a name, input types,
     /// an output type, and possibly a merge expression.
-    Function(Token<'a>, String, Vec<Type>, Type, Option<Expr>),
+    Function(Slice<'a>, String, Vec<Type>, Type, Option<Expr>),
     /// Create a rule, which performs the actions in the `head`
     /// if all the patterns in the `body` are matched.
-    Rule(Token<'a>, Vec<Pattern>, Vec<Action<'a>>),
+    Rule(Slice<'a>, Vec<Pattern>, Vec<Action<'a>>),
     /// Run the `egglog` program.
-    Run(Token<'a>),
+    Run(Slice<'a>),
     /// Get the value of a given `Expr`.
-    Check(Token<'a>, Expr),
+    Check(Slice<'a>, Expr),
     /// Run an action.
     Action(Action<'a>),
 }
@@ -141,7 +141,7 @@ impl Display for Command<'_> {
 impl<'a> Sexp<'a> {
     /// Should never be empty.
     fn parse(
-        tokens: &mut std::iter::Peekable<impl Iterator<Item = Token<'a>>>,
+        tokens: &mut std::iter::Peekable<impl Iterator<Item = Slice<'a>>>,
     ) -> Result<Sexp<'a>, String> {
         let token = tokens.next().unwrap();
         match token.as_str() {
@@ -156,7 +156,7 @@ impl<'a> Sexp<'a> {
                             let (source, end) = (token.source, token.range.end);
                             tokens.next();
                             return Ok(Sexp::List(
-                                Token {
+                                Slice {
                                     source,
                                     range: start..end,
                                 },
@@ -201,7 +201,7 @@ impl<'a> Sexp<'a> {
     }
 
     fn to_pattern(&self) -> Result<(Pattern, Option<(String, Expr)>), String> {
-        fn to_pattern_no_eq(token: &Token, list: &[Sexp]) -> Result<Pattern, String> {
+        fn to_pattern_no_eq(token: &Slice, list: &[Sexp]) -> Result<Pattern, String> {
             match list {
                 [Sexp::Atom(f), xs @ ..] => Ok(Pattern {
                     f: f.as_str().to_owned(),
@@ -370,7 +370,7 @@ impl<'a> Sexp<'a> {
 /// Parse a source string into an `egglog` program.
 pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     // split source text into tokens
-    let mut tokens: Vec<(Token, bool)> = Vec::new();
+    let mut tokens: Vec<(Slice, bool)> = Vec::new();
     let mut in_line_comment = false;
     for (i, c) in source.text.char_indices() {
         if in_line_comment {
@@ -382,7 +382,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
                 ';' => in_line_comment = true,
                 '(' | ')' => tokens.push((
                     #[allow(clippy::range_plus_one)]
-                    Token {
+                    Slice {
                         source,
                         range: i..i + 1,
                     },
@@ -395,7 +395,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
                     }
                     _ => tokens.push((
                         #[allow(clippy::range_plus_one)]
-                        Token {
+                        Slice {
                             source,
                             range: i..i + 1,
                         },
