@@ -65,42 +65,100 @@ impl<'a> State<'a> {
                 self.funcs.insert(f, Table::new(xs, y, merge));
             }
             Command::Rule(_, patterns, actions) => self.rules.push((patterns, actions)),
-            Command::Run(_) => self.run_fixpoint(),
+            Command::Run(_) => self.run_fixpoint()?,
             Command::Check(token, expr) => {
                 println!("{token}: {}", expr.evaluate(&vars, &self.funcs)?);
             }
             Command::Action(action) => {
-                self.run_action(&action, &vars)?;
+                run_action(&action, &vars, &mut self.funcs)?;
             }
         }
         Ok(())
     }
 
-    fn run_fixpoint(&mut self) {
+    fn run_fixpoint(&mut self) -> Result<(), String> {
         let mut changed = true;
         while changed {
             changed = false;
-            for _rule in &self.rules {
-                todo!("match pattern, bind vars, run actions")
-            }
-        }
-    }
-
-    fn run_action(&mut self, action: &Action, vars: &HashMap<&str, Value>) -> Result<bool, String> {
-        match action {
-            Action::Insert(_, f, xs, y) => {
-                let xs = xs
+            for (patterns, actions) in &self.rules {
+                // per pattern, per row, list of assignments
+                let binding: Vec<Vec<Vec<(&str, Value)>>> = patterns
                     .iter()
-                    .map(|x| x.evaluate(vars, &self.funcs))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let y = y.evaluate(vars, &self.funcs)?;
-                let changed = self
-                    .funcs
-                    .get_mut(f.as_str())
-                    .ok_or(format!("unknown function {f}"))?
-                    .insert(&xs, y)?;
-                Ok(changed)
+                    .map(|pattern| {
+                        self.funcs[&pattern.f]
+                            .rows()
+                            .map(|(xs, _)| {
+                                pattern
+                                    .xs
+                                    .iter()
+                                    .zip(xs)
+                                    .map(|(a, b)| (a.as_str(), *b))
+                                    .collect()
+                            })
+                            .collect()
+                    })
+                    .collect();
+                // per rows, per pattern, assignments
+                let bindings = multi_cartesian_product(binding);
+                // flatten, filter out non-matching assignments, convert to hashmaps
+                let bindings = bindings.into_iter().flatten().filter_map(|assignments| {
+                    let mut out: HashMap<&str, Value> = HashMap::new();
+                    for (key, value) in assignments {
+                        if let Some(v) = out.get(key) {
+                            if *v != value {
+                                return None;
+                            }
+                        } else {
+                            out.insert(key, value);
+                        }
+                    }
+                    Some(out)
+                });
+
+                for binding in bindings {
+                    for action in actions {
+                        if run_action(action, &binding, &mut self.funcs)? {
+                            changed = true;
+                        }
+                    }
+                }
             }
         }
+        Ok(())
     }
+}
+
+fn run_action(
+    action: &Action,
+    vars: &HashMap<&str, Value>,
+    funcs: &mut HashMap<String, Table>,
+) -> Result<bool, String> {
+    match action {
+        Action::Insert(_, f, xs, y) => {
+            let xs = xs
+                .iter()
+                .map(|x| x.evaluate(vars, funcs))
+                .collect::<Result<Vec<_>, _>>()?;
+            let y = y.evaluate(vars, funcs)?;
+            let changed = funcs
+                .get_mut(f.as_str())
+                .ok_or(format!("unknown function {f}"))?
+                .insert(&xs, y)?;
+            Ok(changed)
+        }
+    }
+}
+
+fn multi_cartesian_product<T: Clone>(vecs: Vec<Vec<T>>) -> Vec<Vec<T>> {
+    vecs.into_iter().fold(vec![vec![]], |xss, ys| {
+        let mut out = Vec::new();
+        for xs in xss {
+            for y in &ys {
+                let mut xs = xs.clone();
+                xs.push(y.clone());
+                out.push(xs);
+            }
+        }
+        out
+    })
 }
