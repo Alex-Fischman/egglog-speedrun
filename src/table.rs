@@ -42,7 +42,14 @@ impl Table {
     pub fn get(&self, inputs: &[Value]) -> Result<Value, String> {
         self.match_inputs(inputs)?;
         match self.data.get(inputs) {
-            None => Err(String::from("unknown output")),
+            None => Err(format!(
+                "unknown output for ({})",
+                inputs
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )),
             Some(&output) => {
                 output.assert_type(&self.output)?;
                 Ok(output)
