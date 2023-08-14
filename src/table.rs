@@ -51,26 +51,28 @@ impl Table {
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
-    pub fn insert(&mut self, inputs: &[Value], output: Value) -> Result<(), String> {
+    /// Returns true if the table was changed.
+    pub fn insert(&mut self, inputs: &[Value], output: Value) -> Result<bool, String> {
         self.match_inputs(inputs)?;
         output.assert_type(&self.output)?;
         match self.data.get_mut(inputs) {
             None => {
                 self.data.insert(inputs.to_vec(), output);
+                Ok(true)
             }
-            Some(old) => match (&self.merge, &self.output) {
+            Some(in_table) => match (&self.merge, &self.output) {
                 (Some(merge), _) => {
-                    *old = merge.evaluate(
-                        &HashMap::from([("old", *old), ("new", output)]),
+                    *in_table = merge.evaluate(
+                        &HashMap::from([("old", *in_table), ("new", output)]),
                         &HashMap::new(),
                     )?;
+                    Ok(*in_table == output)
                 }
-                (None, Type::Unit) => {}
+                (None, Type::Unit) => Ok(false),
+                (None, Type::Int) => Err(String::from("missing merge function")),
                 (None, Type::Sort(_)) => todo!("union"),
-                (None, Type::Int) => return Err(String::from("missing merge function")),
             },
         }
-        Ok(())
     }
 
     /// Get all of the rows in this table.

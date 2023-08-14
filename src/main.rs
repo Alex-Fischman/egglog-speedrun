@@ -69,24 +69,24 @@ impl<'a> State<'a> {
             Command::Check(token, expr) => {
                 println!("{token}: {}", expr.evaluate(&vars, &self.funcs)?);
             }
-            Command::Action(action) => self.run_action(&action, &vars)?,
+            Command::Action(action) => {
+                self.run_action(&action, &vars)?;
+            }
         }
         Ok(())
     }
 
     fn run_fixpoint(&mut self) {
-        loop {
-            let old = self.as_bytes().to_vec();
+        let mut changed = true;
+        while changed {
+            changed = false;
             for _rule in &self.rules {
                 todo!("match pattern, bind vars, run actions")
-            }
-            if old == self.as_bytes() {
-                break;
             }
         }
     }
 
-    fn run_action(&mut self, action: &Action, vars: &HashMap<&str, Value>) -> Result<(), String> {
+    fn run_action(&mut self, action: &Action, vars: &HashMap<&str, Value>) -> Result<bool, String> {
         match action {
             Action::Insert(_, f, xs, y) => {
                 let xs = xs
@@ -94,21 +94,13 @@ impl<'a> State<'a> {
                     .map(|x| x.evaluate(vars, &self.funcs))
                     .collect::<Result<Vec<_>, _>>()?;
                 let y = y.evaluate(vars, &self.funcs)?;
-                self.funcs
+                let changed = self
+                    .funcs
                     .get_mut(f.as_str())
                     .ok_or(format!("unknown function {f}"))?
                     .insert(&xs, y)?;
+                Ok(changed)
             }
-        }
-        Ok(())
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            std::slice::from_raw_parts(
-                (self as *const State).cast::<u8>(),
-                std::mem::size_of::<State>(),
-            )
         }
     }
 }
