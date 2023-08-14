@@ -101,15 +101,17 @@ impl<'a> State<'a> {
                 // per rows, per pattern, assignments
                 let bindings = multi_cartesian_product(binding);
                 // flatten, filter out non-matching assignments, convert to hashmaps
-                let bindings = bindings.into_iter().flatten().filter_map(|assignments| {
+                let bindings = bindings.into_iter().filter_map(|binding| {
                     let mut out: HashMap<&str, Value> = HashMap::new();
-                    for (key, value) in assignments {
-                        if let Some(v) = out.get(key) {
-                            if *v != value {
-                                return None;
+                    for assignments in binding {
+                        for (key, value) in assignments {
+                            if let Some(v) = out.get(key) {
+                                if *v != value {
+                                    return None;
+                                }
+                            } else {
+                                out.insert(key, value);
                             }
-                        } else {
-                            out.insert(key, value);
                         }
                     }
                     Some(out)
