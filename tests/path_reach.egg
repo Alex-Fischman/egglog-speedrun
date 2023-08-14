@@ -9,4 +9,4 @@
 (edge 3 4)
 
 (run)
-(check (path 1 6))
+(check (path 1 4))
