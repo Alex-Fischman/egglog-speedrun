@@ -125,7 +125,7 @@ impl Expr {
                 None => Err(format!("unknown variable {self}")),
             },
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
-                ("add", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
+                ("+", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
                 _ => match funcs.get(f) {
                     Some(func) => Ok(func.get(
