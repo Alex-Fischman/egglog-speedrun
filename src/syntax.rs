@@ -54,18 +54,17 @@ pub struct Pattern(pub Vec<Expr>);
 
 impl Display for Pattern {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        if self.0.len() == 1 {
-            write!(f, "{}", self.0[0])
-        } else {
-            write!(
+        match self.0.as_slice() {
+            [] => panic!("pattern should never be empty"),
+            [x] => write!(f, "{x}"),
+            xs => write!(
                 f,
                 "(= {})",
-                self.0
-                    .iter()
+                xs.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
                     .join(" ")
-            )
+            ),
         }
     }
 }
