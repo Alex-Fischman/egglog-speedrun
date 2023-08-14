@@ -73,6 +73,7 @@ impl Table {
         Ok(())
     }
 
+    /// Get all of the rows in this table.
     pub fn rows(&self) -> impl Iterator<Item = (&Vec<Value>, &Value)> {
         self.data.iter()
     }
