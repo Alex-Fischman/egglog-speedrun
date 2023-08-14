@@ -69,11 +69,12 @@ impl Table {
             }
             Some(in_table) => match (&self.merge, &self.output) {
                 (Some(merge), _) => {
+                    let old = *in_table;
                     *in_table = merge.evaluate(
-                        &HashMap::from([("old", *in_table), ("new", output)]),
+                        &HashMap::from([("old", old), ("new", output)]),
                         &HashMap::new(),
                     )?;
-                    Ok(*in_table == output)
+                    Ok(old != *in_table)
                 }
                 (None, Type::Unit) => Ok(false),
                 (None, Type::Int) => Err(String::from("missing merge function")),
