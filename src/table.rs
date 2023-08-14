@@ -39,13 +39,13 @@ impl Table {
     }
 
     /// Get the output of a row in the table given its inputs.
-    pub fn get(&self, inputs: &[Value]) -> Result<Value, String> {
-        self.match_inputs(inputs)?;
-        match self.data.get(inputs) {
+    pub fn get(&self, f: &str, xs: &[Value]) -> Result<Value, String> {
+        self.match_inputs(xs)?;
+        match self.data.get(xs) {
             None => Err(format!(
-                "unknown output for ({})",
-                inputs
-                    .iter()
+                "unknown output for ({} {})",
+                f,
+                xs.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
                     .join(" ")
