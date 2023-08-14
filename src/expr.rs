@@ -94,7 +94,7 @@ impl Expr {
     /// Get a `Value` from an `Expr` under a given context.
     pub fn evaluate(
         &self,
-        vars: &HashMap<String, Value>,
+        vars: &HashMap<&str, Value>,
         funcs: &HashMap<String, Table>,
     ) -> Result<Value, String> {
         let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
@@ -105,7 +105,7 @@ impl Expr {
         match self {
             Expr::Unit => Ok(Value::Unit),
             Expr::Int(i) => Ok(Value::Int(*i)),
-            Expr::Var(s) => match vars.get(s) {
+            Expr::Var(s) => match vars.get(s.as_str()) {
                 Some(v) => Ok(*v),
                 None => Err(format!("unknown variable {self}")),
             },

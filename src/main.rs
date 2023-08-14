@@ -38,7 +38,6 @@ struct State<'a> {
     sorts: Vec<String>,
     funcs: HashMap<String, Table>,
     rules: Vec<(Vec<Pattern>, Vec<Action<'a>>)>,
-    vars: HashMap<String, Value>, // always empty
 }
 
 impl<'a> State<'a> {
@@ -47,11 +46,11 @@ impl<'a> State<'a> {
             sorts: Vec::new(),
             funcs: HashMap::new(),
             rules: Vec::new(),
-            vars: HashMap::new(),
         }
     }
 
     fn run_command(&mut self, command: Command<'a>) -> Result<(), String> {
+        let vars = HashMap::new();
         match command {
             Command::Sort(token, sort) => {
                 if self.sorts.contains(&sort) {
@@ -68,9 +67,9 @@ impl<'a> State<'a> {
             Command::Rule(_, patterns, actions) => self.rules.push((patterns, actions)),
             Command::Run(_) => self.run_fixpoint(),
             Command::Check(token, expr) => {
-                println!("{token}: {}", expr.evaluate(&self.vars, &self.funcs)?);
+                println!("{token}: {}", expr.evaluate(&vars, &self.funcs)?);
             }
-            Command::Action(action) => self.run_action(&action)?,
+            Command::Action(action) => self.run_action(&action, &vars)?,
         }
         Ok(())
     }
@@ -87,16 +86,16 @@ impl<'a> State<'a> {
         }
     }
 
-    fn run_action(&mut self, action: &Action) -> Result<(), String> {
+    fn run_action(&mut self, action: &Action, vars: &HashMap<&str, Value>) -> Result<(), String> {
         match action {
             Action::Insert(_, f, xs, y) => {
                 let xs = xs
                     .iter()
-                    .map(|x| x.evaluate(&self.vars, &self.funcs))
+                    .map(|x| x.evaluate(vars, &self.funcs))
                     .collect::<Result<Vec<_>, _>>()?;
-                let y = y.evaluate(&self.vars, &self.funcs)?;
+                let y = y.evaluate(vars, &self.funcs)?;
                 self.funcs
-                    .get_mut(f)
+                    .get_mut(f.as_str())
                     .ok_or(format!("unknown function {f}"))?
                     .insert(&xs, y)?;
             }

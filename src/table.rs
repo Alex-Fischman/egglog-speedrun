@@ -61,10 +61,7 @@ impl Table {
             Some(old) => match (&self.merge, &self.output) {
                 (Some(merge), _) => {
                     *old = merge.evaluate(
-                        &HashMap::from([
-                            (String::from("old"), *old),
-                            (String::from("new"), output),
-                        ]),
+                        &HashMap::from([("old", *old), ("new", output)]),
                         &HashMap::new(),
                     )?;
                 }
@@ -74,5 +71,9 @@ impl Table {
             },
         }
         Ok(())
+    }
+
+    pub fn rows(&self) -> impl Iterator<Item = (&Vec<Value>, &Value)> {
+        self.data.iter()
     }
 }
