@@ -40,6 +40,24 @@ struct State<'a> {
     rules: Vec<(Vec<Pattern>, Vec<Action<'a>>)>,
 }
 
+impl Display for State<'_> {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        for (f_, table) in &self.funcs {
+            for (xs, y) in table.rows() {
+                writeln!(
+                    f,
+                    "{f_}: {}: {y}",
+                    xs.iter()
+                        .map(|x| format!("{x}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl<'a> State<'a> {
     fn new() -> State<'a> {
         State {
