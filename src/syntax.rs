@@ -49,16 +49,25 @@ enum Sexp<'a> {
 }
 
 /// A pattern to match on in the body of a `Command::Rule`.
-pub struct Pattern {
-    /// The name of the table to iterate over.
-    pub f: String,
-    /// The names to assign the inputs to while iterating.
-    pub xs: Vec<String>,
-}
+/// It represents an assertion of equality between its `Expr`s.
+/// `self.0` must be nonempty.
+pub struct Pattern(pub Vec<Expr>);
 
 impl Display for Pattern {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "({} {})", self.f, self.xs.join(" "))
+        if self.0.len() == 1 {
+            write!(f, "{}", self.0[0])
+        } else {
+            write!(
+                f,
+                "(= {})",
+                self.0
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        }
     }
 }
 
@@ -200,52 +209,13 @@ impl<'a> Sexp<'a> {
         }
     }
 
-    fn to_pattern(&self) -> Result<(Pattern, Option<(String, Expr)>), String> {
-        fn to_pattern_no_eq(token: &Slice, list: &[Sexp]) -> Result<Pattern, String> {
-            match list {
-                [Sexp::Atom(f), xs @ ..] => Ok(Pattern {
-                    f: f.as_str().to_owned(),
-                    xs: xs
-                        .iter()
-                        .map(|arg| match arg {
-                            Sexp::Atom(x) => Ok(x.as_str().to_owned()),
-                            Sexp::List(token, _) => {
-                                Err(format!("expected variable, found {token}"))
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                }),
-                _ => Err(format!("expected pattern, found {token}")),
-            }
-        }
+    fn to_pattern(&self) -> Result<Pattern, String> {
         match self {
             Sexp::List(token, list) => match list.as_slice() {
-                [Sexp::Atom(eq), args @ ..] if eq.as_str() == "=" => {
-                    let mut atoms = Vec::new();
-                    let mut lists = Vec::new();
-                    for arg in args {
-                        match arg {
-                            Sexp::Atom(atom) => atoms.push(atom),
-                            Sexp::List(token, list) => lists.push((token, list)),
-                        }
-                    }
-                    let ret = match atoms.as_slice() {
-                        [x] => x.as_str().to_owned(),
-                        [] => return Err(format!("no bindings for return value in {token}")),
-                        _ => return Err(format!("multiple bindings for return value in {token}")),
-                    };
-                    let pattern = match lists.as_slice() {
-                        [(token, list)] => to_pattern_no_eq(token, list)?,
-                        [] => return Err(format!("no bindings for functions in {token}")),
-                        _ => return Err(format!("multiple bindings for functions in {token}")),
-                    };
-                    let substitution = Expr::Call(
-                        pattern.f.clone(),
-                        pattern.xs.iter().cloned().map(Expr::Var).collect(),
-                    );
-                    Ok((pattern, Some((ret, substitution))))
-                }
-                _ => Ok((to_pattern_no_eq(token, list)?, None)),
+                [Sexp::Atom(eq), args @ ..] if eq.as_str() == "=" => Ok(Pattern(
+                    args.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
+                )),
+                _ => Ok(Pattern(vec![self.to_expr()?])),
             },
             Sexp::Atom(token) => Err(format!("expected pattern, found {token}")),
         }
@@ -323,12 +293,10 @@ impl<'a> Sexp<'a> {
                     },
                     "rule" => match list.as_slice() {
                         [_, Sexp::List(_, patterns), Sexp::List(..)] => {
-                            let (patterns, substitutions): (Vec<_>, Vec<_>) = patterns
+                            let patterns: Vec<_> = patterns
                                 .iter()
                                 .map(Sexp::to_pattern)
-                                .collect::<Result<Vec<_>, _>>()?
-                                .into_iter()
-                                .unzip();
+                                .collect::<Result<Vec<_>, _>>()?;
                             let mut actions: Vec<_> = match list.remove(2) {
                                 Sexp::List(_, actions) => actions
                                     .into_iter()
@@ -336,16 +304,6 @@ impl<'a> Sexp<'a> {
                                     .collect::<Result<_, _>>()?,
                                 Sexp::Atom(_) => unreachable!(),
                             };
-
-                            let substitutions: HashMap<_, _> =
-                                substitutions.into_iter().flatten().collect();
-                            actions.iter_mut().for_each(|action| match action {
-                                Action::Insert(_, _, xs, y) => {
-                                    xs.iter_mut().for_each(|x| x.substitute(&substitutions));
-                                    y.substitute(&substitutions);
-                                }
-                            });
-
                             Ok(Command::Rule(token, patterns, actions))
                         }
                         _ => Err(format!("expeted `rule` command, found {token}")),

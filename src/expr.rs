@@ -15,20 +15,6 @@ pub enum Expr {
     Call(String, Vec<Expr>),
 }
 
-impl Expr {
-    /// Replace `Expr::Var`s with other `Expr`s recursively.
-    pub fn substitute(&mut self, substitutions: &HashMap<String, Expr>) {
-        match self {
-            Expr::Unit | Expr::Int(_) => {}
-            Expr::Call(_, xs) => xs.iter_mut().for_each(|x| x.substitute(substitutions)),
-            Expr::Var(v) => match substitutions.get(v) {
-                None => {}
-                Some(v_) => *self = v_.clone(),
-            },
-        }
-    }
-}
-
 impl Display for Expr {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
