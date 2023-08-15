@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "egglog-speedrun"
+name = "egglog"
 version = "0.1.0"

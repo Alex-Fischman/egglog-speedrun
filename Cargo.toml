@@ -1,6 +1,4 @@
 [package]
-name = "egglog-speedrun"
+name = "egglog"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies]
