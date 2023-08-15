@@ -68,8 +68,8 @@ impl Table {
                     .collect::<Vec<_>>()
                     .join(" ")
             )),
-            Some(&row) => {
-                let output = self.primary[row].1;
+            Some(&id) => {
+                let output = self.primary[id].1;
                 output.assert_type(&self.output)?;
                 Ok(output)
             }
@@ -108,8 +108,8 @@ impl Table {
                 self.append_row(xs, y);
                 Ok(true)
             }
-            Some(&row) => {
-                let old = self.primary[row].1;
+            Some(&id) => {
+                let old = self.primary[id].1;
                 let new = match (&self.merge, &self.output) {
                     (Some(merge), _) => merge
                         .evaluate(&HashMap::from([("old", old), ("new", y)]), &HashMap::new())?,
@@ -122,7 +122,7 @@ impl Table {
                 if old == new {
                     Ok(false)
                 } else {
-                    self.remove_row(row);
+                    self.remove_row(id);
                     self.append_row(xs, y);
                     Ok(true)
                 }
@@ -131,10 +131,33 @@ impl Table {
     }
 
     /// Get all of the rows in this table.
-    pub fn rows(&self) -> impl Iterator<Item = (&Vec<Value>, &Value)> {
+    pub fn rows(&self) -> impl Iterator<Item = (&[Value], Value)> {
         self.primary
             .iter()
             .filter(|(_, _, live)| *live)
-            .map(|(xs, y, _)| (xs, y))
+            .map(|(xs, y, _)| (xs.as_slice(), *y))
+    }
+
+    /// Get all of the rows that have a specific value in a specific column.
+    #[allow(clippy::type_complexity)]
+    pub fn rows_with_value<'a>(
+        &'a self,
+        value: Value,
+        column: usize,
+    ) -> Result<Box<dyn Iterator<Item = (&[Value], Value)> + 'a>, String> {
+        let index = match column {
+            i if i < self.inputs.len() => &self.input_columns[i],
+            i if i == self.inputs.len() => &self.output_column,
+            i => return Err(format!("invalid column index {i} for {}", self.name)),
+        };
+        let iter: Box<dyn Iterator<Item = (&[Value], Value)>> = match index.get(&value) {
+            Some(set) => Box::new(
+                set.iter()
+                    .map(|id| &self.primary[*id])
+                    .map(|(xs, y, _)| (xs.as_slice(), *y)),
+            ),
+            None => Box::new([].into_iter()),
+        };
+        Ok(iter)
     }
 }
