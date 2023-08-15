@@ -31,14 +31,20 @@ fn run() -> Result<(), String> {
     let mut database = Database::default();
     for command in commands {
         match command {
-            Command::Sort(_, sort) => database.sort(sort)?,
-            Command::Function(_, f, xs, y, merge) => database.function(f, xs, y, merge)?,
-            Command::Rule(_, patterns, actions) => database.rule(patterns, actions)?,
-            Command::Run(_) => database.run()?,
-            Command::Check(token, expr) => println!("{token}: {}", database.check(&expr)?),
+            Command::Sort(_, sort) => {
+                database.sort(sort)?;
+            }
+            Command::Function(_, f, xs, y, merge) => {
+                database.function(f, xs, y, merge)?;
+            }
+            Command::Rule(_, patterns, actions) => {
+                database.rule(patterns, actions)?;
+            }
             Command::Action(action) => {
                 database.action(&action)?;
             }
+            Command::Run(_) => database.run()?,
+            Command::Check(token, expr) => println!("{token}: {}", database.check(&expr)?),
         }
     }
     Ok(())

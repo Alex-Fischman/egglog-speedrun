@@ -30,12 +30,12 @@ impl Display for Database<'_> {
 
 impl<'a> Database<'a> {
     /// Add a sort to this `Database`.
-    pub fn sort(&mut self, sort: String) -> Result<(), String> {
+    pub fn sort(&mut self, sort: String) -> Result<&mut Database<'a>, String> {
         if self.sorts.contains(&sort) {
             return Err(format!("{sort} was declared twice"));
         }
         self.sorts.push(sort);
-        Ok(())
+        Ok(self)
     }
 
     /// Add a function to this `Database`.
@@ -45,28 +45,33 @@ impl<'a> Database<'a> {
         xs: Vec<Type>,
         y: Type,
         merge: Option<Expr>,
-    ) -> Result<(), String> {
+    ) -> Result<&mut Database<'a>, String> {
         if self.funcs.contains_key(&f) {
             return Err(format!("{f} was declared twice"));
         }
         self.funcs.insert(f, Table::new(xs, y, merge));
-        Ok(())
+        Ok(self)
     }
 
     /// Add a rule to this `Database`.
-    pub fn rule(&mut self, patterns: Vec<Pattern>, actions: Vec<Action<'a>>) -> Result<(), String> {
+    pub fn rule(
+        &mut self,
+        patterns: Vec<Pattern>,
+        actions: Vec<Action<'a>>,
+    ) -> Result<&mut Database<'a>, String> {
         self.rules.push((patterns, actions));
-        Ok(())
+        Ok(self)
+    }
+
+    /// Run an action to this `Database`.
+    pub fn action(&mut self, action: &Action) -> Result<&mut Database<'a>, String> {
+        run_action(action, &HashMap::new(), &mut self.funcs)?;
+        Ok(self)
     }
 
     /// Get the value of `expr` given the functions in this `Database`.
     pub fn check(&mut self, expr: &Expr) -> Result<Value, String> {
         expr.evaluate(&HashMap::new(), &self.funcs)
-    }
-
-    /// Run an action to this `Database`.
-    pub fn action(&mut self, action: &Action) -> Result<bool, String> {
-        run_action(action, &HashMap::new(), &mut self.funcs)
     }
 
     /// Run the rules in this `Database` to fixpoint.
@@ -124,6 +129,7 @@ impl<'a> Database<'a> {
     }
 }
 
+/// Returns true if running the action changed `funcs`.
 fn run_action(
     action: &Action,
     vars: &HashMap<&str, Value>,
