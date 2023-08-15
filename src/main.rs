@@ -11,7 +11,7 @@ pub mod syntax;
 pub mod table;
 
 pub use crate::{database::*, expr::*, syntax::*, table::*};
-pub use std::collections::HashMap;
+pub use std::collections::{HashMap, HashSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
 
 fn main() {

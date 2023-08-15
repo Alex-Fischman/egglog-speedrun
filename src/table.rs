@@ -17,7 +17,9 @@ pub struct Table {
     /// The rows in this table indexed by all of the input columns.
     function: HashMap<Vec<Value>, RowId>,
     /// The rows in this table indexed by each input column.
-    columns: Vec<HashMap<Value, RowId>>,
+    input_columns: Vec<HashMap<Value, HashSet<RowId>>>,
+    /// The rows in this table indexed by the output column.
+    output_column: HashMap<Value, HashSet<RowId>>,
 }
 
 type RowId = usize;
@@ -42,15 +44,15 @@ impl Table {
     /// Create a new `Table` with the given schema.
     #[must_use]
     pub fn new(name: String, inputs: Vec<Type>, output: Type, merge: Option<Expr>) -> Table {
-        let columns = vec![HashMap::new(); inputs.len()];
         Table {
+            primary: Vec::new(),
+            function: HashMap::new(),
+            input_columns: vec![HashMap::new(); inputs.len()],
+            output_column: HashMap::new(),
             name,
             inputs,
             output,
             merge,
-            primary: Vec::new(),
-            function: HashMap::new(),
-            columns,
         }
     }
 
@@ -74,22 +76,38 @@ impl Table {
         }
     }
 
+    /// Adds a row to the table, assuming that `xs` is not already present.
+    fn append_row(&mut self, xs: &[Value], y: Value) {
+        let id = self.primary.len();
+        self.primary.push((xs.to_vec(), y, true));
+        self.function.insert(xs.to_vec(), id);
+        for (input_column, x) in self.input_columns.iter_mut().zip(xs) {
+            input_column.entry(*x).or_default().insert(id);
+        }
+        self.output_column.entry(y).or_default().insert(id);
+    }
+
+    /// Removes a row from the table by marking it as dead.
+    fn remove_row(&mut self, id: RowId) {
+        let (xs, y, live) = &mut self.primary[id];
+        *live = false;
+        self.function.remove(xs);
+        for (input_column, x) in self.input_columns.iter_mut().zip(xs) {
+            input_column.get_mut(x).unwrap().remove(&id);
+        }
+        self.output_column.get_mut(y).unwrap().remove(&id);
+    }
+
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the table was changed.
     pub fn insert(&mut self, xs: &[Value], y: Value) -> Result<bool, String> {
         self.match_inputs(xs)?;
         y.assert_type(&self.output)?;
-        let append_row = |table: &mut Table| {
-            let id = table.primary.len();
-            table.primary.push((xs.to_vec(), y, true));
-            table.function.insert(xs.to_vec(), id);
-            for (column, x) in table.columns.iter_mut().zip(xs) {
-                column.insert(*x, id);
-            }
-            Ok(true)
-        };
         match self.function.get(xs) {
-            None => append_row(self),
+            None => {
+                self.append_row(xs, y);
+                Ok(true)
+            }
             Some(&row) => {
                 let old = self.primary[row].1;
                 let new = match (&self.merge, &self.output) {
@@ -104,8 +122,9 @@ impl Table {
                 if old == new {
                     Ok(false)
                 } else {
-                    self.primary[row].2 = false;
-                    append_row(self)
+                    self.remove_row(row);
+                    self.append_row(xs, y);
+                    Ok(true)
                 }
             }
         }
