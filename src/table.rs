@@ -4,6 +4,7 @@ use crate::*;
 
 /// A single function in an `egglog` program.
 pub struct Table {
+    name: String,
     inputs: Vec<Type>,
     output: Type,
     merge: Option<Expr>,
@@ -19,18 +20,20 @@ impl Table {
             Ok(())
         } else {
             Err(format!(
-                "expected {} inputs, found {} inputs",
+                "expected {} inputs, found {} inputs for {}",
                 self.inputs.len(),
-                inputs.len()
+                inputs.len(),
+                self.name,
             ))
         }
     }
 
     /// Create a new `Table` with the given schema.
     #[must_use]
-    pub fn new(inputs: Vec<Type>, output: Type, merge: Option<Expr>) -> Table {
+    pub fn new(name: String, inputs: Vec<Type>, output: Type, merge: Option<Expr>) -> Table {
         let data = HashMap::new();
         Table {
+            name,
             inputs,
             output,
             merge,
@@ -39,12 +42,12 @@ impl Table {
     }
 
     /// Get the output of a row in the table given its inputs.
-    pub fn get(&self, f: &str, xs: &[Value]) -> Result<Value, String> {
+    pub fn get(&self, xs: &[Value]) -> Result<Value, String> {
         self.match_inputs(xs)?;
         match self.data.get(xs) {
             None => Err(format!(
                 "unknown output for ({} {})",
-                f,
+                self.name,
                 xs.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
@@ -77,7 +80,7 @@ impl Table {
                     Ok(old != *in_table)
                 }
                 (None, Type::Unit) => Ok(false),
-                (None, Type::Int) => Err(String::from("missing merge function")),
+                (None, Type::Int) => Err(format!("missing merge function for {}", self.name)),
                 (None, Type::Sort(_)) => todo!("union"),
             },
         }

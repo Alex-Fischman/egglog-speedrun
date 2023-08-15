@@ -49,7 +49,7 @@ impl<'a> Database<'a> {
         if self.funcs.contains_key(&f) {
             return Err(format!("{f} was declared twice"));
         }
-        self.funcs.insert(f, Table::new(xs, y, merge));
+        self.funcs.insert(f.clone(), Table::new(f, xs, y, merge));
         Ok(self)
     }
 

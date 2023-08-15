@@ -129,7 +129,6 @@ impl Expr {
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
                 _ => match funcs.get(f) {
                     Some(func) => Ok(func.get(
-                        f,
                         &xs.iter()
                             .map(|x| x.evaluate(vars, funcs))
                             .collect::<Result<Vec<_>, _>>()?,
