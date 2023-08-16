@@ -86,6 +86,9 @@ impl Query {
         for row in rows {
             println!("row: {row:?}");
         }
+        for (key, deps) in deps {
+            println!("deps: {key} {deps:?}");
+        }
 
         todo!("generate query")
     }
@@ -181,13 +184,19 @@ fn eqs_from_expr(
 
 fn deps_from_expr(
     // The `Expr` to find the dependencies of.
-    _expr: &Expr,
+    expr: &Expr,
     // A map from variable names to canoncial keys.
-    _names: &HashMap<String, usize>,
+    names: &HashMap<String, usize>,
     // The set of dependencies.
-    _deps: &mut HashSet<usize>,
+    deps: &mut HashSet<usize>,
 ) {
-    todo!()
+    match expr {
+        Expr::Var(var) if names.contains_key(var) => {
+            deps.insert(names[var]);
+        }
+        Expr::Call(_, xs) => xs.iter().for_each(|x| deps_from_expr(x, names, deps)),
+        Expr::Unit | Expr::Int(_) | Expr::Var(_) => {}
+    }
 }
 
 // fn multi_cartesian_product<T: Clone>(vecs: Vec<Vec<T>>) -> Vec<Vec<T>> {
