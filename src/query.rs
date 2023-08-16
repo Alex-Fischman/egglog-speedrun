@@ -34,14 +34,15 @@ impl Query {
                 Expr::Call(f, xs) if funcs.contains(f) => {
                     let mut row = Vec::new();
                     for (i, x) in xs.iter().enumerate() {
-                        // todo: add a UnionFind method like unify_var_value
-                        let a = eq_from_expr(x, funcs, eqs, rows)?;
-                        let b = eqs.new_key(EqClass {
-                            columns: vec![(f.clone(), i)],
-                            ..EqClass::default()
-                        });
-                        eqs.union(a, b)?;
-                        row.push(a);
+                        let x = eq_from_expr(x, funcs, eqs, rows)?;
+                        eqs.merge(
+                            x,
+                            EqClass {
+                                columns: vec![(f.clone(), i)],
+                                ..EqClass::default()
+                            },
+                        )?;
+                        row.push(x);
                     }
                     let y = eqs.new_key(EqClass {
                         columns: vec![(f.clone(), xs.len())],

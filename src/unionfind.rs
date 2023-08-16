@@ -66,6 +66,19 @@ impl<'a, V> UnionFind<'a, V> {
         Ok(())
     }
 
+    /// Merge a new value into an existing set without creating a new key.
+    pub fn merge(&mut self, key: usize, x: V) -> Result<(), String> {
+        // See comments for `Database::union` on why we do it this way.
+        let (key, _) = self.find(key);
+        let y = std::mem::replace(&mut self.trees[key], ParentOrValue::Parent(0));
+        let z = match y {
+            ParentOrValue::Value(y) => (self.merge)(x, y)?,
+            ParentOrValue::Parent(_) => unreachable!(),
+        };
+        self.trees[key] = ParentOrValue::Value(z);
+        Ok(())
+    }
+
     /// Get all of the canonical keys and their values in this `UnionFind`.
     pub fn iter(&self) -> impl Iterator<Item = (usize, &V)> {
         self.trees.iter().enumerate().filter_map(|(k, v)| match v {
