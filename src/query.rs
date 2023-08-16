@@ -6,66 +6,67 @@ use crate::*;
 /// all possible variable bindings that satisfy a multi-pattern.
 pub struct Query;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct EqClass {
-    name: Option<String>,
-    value: Option<Value>,
+    names: HashSet<String>,
+    exprs: Vec<Expr>,
     columns: Vec<(String, usize)>,
 }
 
 impl Query {
     /// Construct a new `Query` from a multi-pattern.
-    pub fn new(slice: &Slice, patterns: &[Pattern]) -> Result<Query, String> {
-        fn eq_from_expr(expr: &Expr, eqs: &mut UnionFind<EqClass>) -> Result<usize, String> {
+    pub fn new(funcs: &HashSet<&String>, patterns: &[Pattern]) -> Result<Query, String> {
+        fn eq_from_expr(
+            // The expression to transform into an `EqClass`.
+            expr: &Expr,
+            // The set of functions that exist.
+            funcs: &HashSet<&String>,
+            // A `UnionFind` to combine the `EqClass`es.
+            eqs: &mut UnionFind<EqClass>,
+            // A list of `eqs` keys that are all in the same row.
+            rows: &mut Vec<(String, Vec<usize>)>,
+        ) -> Result<usize, String> {
             Ok(match expr {
-                Expr::Unit => eqs.new_key(EqClass {
-                    value: Some(Value::Unit),
+                Expr::Var(var) => eqs.new_key(EqClass {
+                    names: HashSet::from([var.clone()]),
                     ..EqClass::default()
                 }),
-                Expr::Int(i) => eqs.new_key(EqClass {
-                    value: Some(Value::Int(*i)),
-                    ..EqClass::default()
-                }),
-                Expr::Var(v) => eqs.new_key(EqClass {
-                    name: Some(v.clone()),
-                    ..EqClass::default()
-                }),
-                Expr::Call(f, xs) => {
-                    // todo: need some way to constrain that all of
-                    //       these keys are in the same row
+                Expr::Call(f, xs) if funcs.contains(f) => {
+                    let mut row = Vec::new();
                     for (i, x) in xs.iter().enumerate() {
-                        let a = eq_from_expr(x, eqs)?;
+                        // todo: add a UnionFind method like unify_var_value
+                        let a = eq_from_expr(x, funcs, eqs, rows)?;
                         let b = eqs.new_key(EqClass {
                             columns: vec![(f.clone(), i)],
                             ..EqClass::default()
                         });
                         eqs.union(a, b)?;
+                        row.push(a);
                     }
-                    eqs.new_key(EqClass {
+                    let y = eqs.new_key(EqClass {
                         columns: vec![(f.clone(), xs.len())],
                         ..EqClass::default()
-                    })
+                    });
+                    row.push(y);
+                    rows.push((f.clone(), row));
+                    y
                 }
+                _ => eqs.new_key(EqClass {
+                    exprs: vec![expr.clone()],
+                    ..EqClass::default()
+                }),
             })
         }
 
         let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
             Ok(EqClass {
-                name: match (a.name, b.name) {
-                    (Some(a), None) | (None, Some(a)) => Some(a),
-                    (None, None) => None,
-                    (Some(a), Some(b)) if a == b => Some(a),
-                    (Some(a), Some(b)) => {
-                        return Err(format!("{a} and {b} refer to the same value in {slice}"))
-                    }
+                names: {
+                    a.names.extend(b.names);
+                    a.names
                 },
-                value: match (a.value, b.value) {
-                    (Some(a), None) | (None, Some(a)) => Some(a),
-                    (None, None) => None,
-                    (Some(a), Some(b)) if a == b => Some(a),
-                    (Some(a), Some(b)) => {
-                        return Err(format!("{a} and {b} are never equal in {slice}"))
-                    }
+                exprs: {
+                    a.exprs.append(&mut b.exprs);
+                    a.exprs
                 },
                 columns: {
                     a.columns.append(&mut b.columns);
@@ -74,13 +75,15 @@ impl Query {
             })
         });
 
+        let mut rows = Vec::new();
+
         // add constraints from each pattern individually
         for pattern in patterns {
             assert!(!pattern.0.is_empty());
 
-            let a = eq_from_expr(&pattern.0[0], &mut eqs)?;
+            let a = eq_from_expr(&pattern.0[0], funcs, &mut eqs, &mut rows)?;
             for expr in &pattern.0[1..] {
-                let b = eq_from_expr(expr, &mut eqs)?;
+                let b = eq_from_expr(expr, funcs, &mut eqs, &mut rows)?;
                 eqs.union(a, b)?;
             }
         }
@@ -89,7 +92,7 @@ impl Query {
         let mut names_to_keys: HashMap<String, usize> = HashMap::new();
         let mut to_union = Vec::new();
         for (key, value) in eqs.iter() {
-            if let Some(name) = &value.name {
+            for name in &value.names {
                 names_to_keys
                     .entry(name.clone())
                     .and_modify(|old| {
@@ -103,8 +106,18 @@ impl Query {
             eqs.union(a, b)?;
         }
 
+        // todo: add dependency constraints based on exprs
+
         let classes: Vec<_> = eqs.iter().map(|t| t.1).collect();
-        println!("{classes:#?}");
+        for class in classes {
+            println!("names: {:?}", class.names);
+            println!("exprs: {:?}", class.exprs);
+            println!("columns: {:?}", class.columns);
+            println!();
+        }
+        for row in rows {
+            println!("row: {row:?}");
+        }
 
         todo!("generate query")
     }
