@@ -45,7 +45,11 @@ fn run() -> Result<(), String> {
                 database.action(&action)?;
             }
             Command::Run(_) => database.run()?,
-            Command::Check(token, expr) => println!("{token}: {}", database.check(&expr)?),
+            Command::Check(token, patterns) => {
+                if database.check(&Query::new(&patterns)) {
+                    println!("failure: {token}");
+                }
+            }
         }
     }
     Ok(())

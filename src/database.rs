@@ -70,8 +70,8 @@ impl<'a> Database<'a> {
     }
 
     /// Get the value of `expr` given the functions in this `Database`.
-    pub fn check(&mut self, expr: &Expr) -> Result<Value, String> {
-        expr.evaluate(&HashMap::new(), &self.funcs)
+    pub fn check(&mut self, query: &Query) -> bool {
+        query.run(&self.funcs).next().is_some()
     }
 
     /// Run the rules in this `Database` to fixpoint.

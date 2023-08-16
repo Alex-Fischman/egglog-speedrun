@@ -107,7 +107,7 @@ pub enum Command<'a> {
     /// Run the `egglog` program.
     Run(Slice<'a>),
     /// Get the value of a given `Expr`.
-    Check(Slice<'a>, Expr),
+    Check(Slice<'a>, Vec<Pattern>),
     /// Run an action.
     Action(Action<'a>),
 }
@@ -141,7 +141,14 @@ impl Display for Command<'_> {
                     .join(" ")
             ),
             Command::Run(_) => write!(f, "(run)"),
-            Command::Check(_, x) => write!(f, "(check {x})"),
+            Command::Check(_, ps) => write!(
+                f,
+                "(check {})",
+                ps.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
             Command::Action(q) => write!(f, "{q}"),
         }
     }
@@ -313,7 +320,13 @@ impl<'a> Sexp<'a> {
                         _ => Err(format!("expeted `run` command, found {token}")),
                     },
                     "check" => match list.as_slice() {
-                        [_, expr] => Ok(Command::Check(token, expr.to_expr()?)),
+                        [_, patterns @ ..] => Ok(Command::Check(
+                            token,
+                            patterns
+                                .iter()
+                                .map(Sexp::to_pattern)
+                                .collect::<Result<Vec<_>, _>>()?,
+                        )),
                         _ => Err(format!("expeted `check` command, found {token}")),
                     },
                     _ => Ok(Command::Action(Sexp::List(token, list).to_action()?)),
