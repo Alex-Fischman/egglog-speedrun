@@ -3,7 +3,7 @@
 use crate::*;
 
 /// An `egglog` expression.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     /// The unit value.
     Unit,

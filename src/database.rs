@@ -91,6 +91,12 @@ impl<'a> Database<'a> {
         }
         Ok(())
     }
+
+    /// Get the names of the functions in this database.
+    #[must_use]
+    pub fn funcs(&self) -> HashSet<&String> {
+        self.funcs.keys().collect()
+    }
 }
 
 /// Returns true if running the action changed `funcs`.
