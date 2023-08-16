@@ -74,13 +74,21 @@ impl Query {
         }
 
         // Do congruence closure; if functions have the same inputs, they have the same output.
-        // todo!
+        for (i, (f, f_cols)) in rows.iter().enumerate() {
+            for (g, g_cols) in &rows[i + 1..] {
+                let f_y = f_cols.len() - 1;
+                let g_y = g_cols.len() - 1;
+                if f == g && f_cols[0..f_y] == g_cols[0..g_y] {
+                    eqs.union(f_cols[f_y], g_cols[g_y])?;
+                }
+            }
+        }
 
         // We're about to do stuff with canoncial keys, so make `eqs` immutable.
         let eqs = eqs;
 
         // Change keys to canonical keys.
-        let rows: Vec<(String, Vec<_>)> = rows
+        let rows: HashSet<(String, Vec<_>)> = rows
             .into_iter()
             .map(|(f, v)| (f, v.into_iter().map(|key| eqs.find(key).0).collect()))
             .collect();
