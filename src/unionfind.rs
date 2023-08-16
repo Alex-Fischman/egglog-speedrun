@@ -1,19 +1,18 @@
 //! This module contains an implementation of the Union Find datastructure,
 //! also called the Disjoint Set Union datastructure.
 
-/// A data structure for efficiently unioning sets.
-/// It also supports having each set map to a value.
-/// If you don't want this, use () as the value and call `default`.
+use crate::*;
+
+/// A data structure for efficiently unioning sets of `usize`s.
+/// It also supports having each set map to a value, and merging them when their
+/// sets are unioned. If you don't want values, use () as the value and call `default`.
 pub struct UnionFind<'a, V> {
     trees: Vec<ParentOrValue<V>>,
     merge: Box<dyn Fn(V, V) -> Result<V, String> + 'a>,
 }
 
-/// We don't let users change the key type, but we do provide a nice alias!
-pub type Key = usize;
-
 enum ParentOrValue<V> {
-    Parent(Key),
+    Parent(usize),
     Value(V),
 }
 
@@ -36,14 +35,14 @@ impl<'a, V> UnionFind<'a, V> {
     }
 
     /// Create a new key with a given value and return it.
-    pub fn new_key(&mut self, value: V) -> Key {
+    pub fn new_key(&mut self, value: V) -> usize {
         self.trees.push(ParentOrValue::Value(value));
         self.trees.len() - 1
     }
 
     /// Get the canonical key and value associated with the given key.
     #[must_use]
-    pub fn find(&self, key: Key) -> (Key, &V) {
+    pub fn find(&self, key: usize) -> (usize, &V) {
         match &self.trees[key] {
             ParentOrValue::Parent(key) => self.find(*key),
             ParentOrValue::Value(value) => (key, value),
@@ -52,7 +51,7 @@ impl<'a, V> UnionFind<'a, V> {
 
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
     #[allow(clippy::many_single_char_names)]
-    pub fn union(&mut self, a: Key, b: Key) -> Result<(), String> {
+    pub fn union(&mut self, a: usize, b: usize) -> Result<(), String> {
         let (a, _) = self.find(a);
         let (b, _) = self.find(b);
         if a != b {
@@ -68,5 +67,15 @@ impl<'a, V> UnionFind<'a, V> {
             self.trees[b] = ParentOrValue::Parent(a);
         }
         Ok(())
+    }
+
+    /// Get the sets that this `UnionFind` is storing.
+    #[must_use]
+    pub fn partition(&self) -> HashMap<usize, Vec<usize>> {
+        let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
+        for key in 0..self.trees.len() {
+            out.entry(self.find(key).0).or_default().push(key);
+        }
+        out
     }
 }
