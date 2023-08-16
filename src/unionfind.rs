@@ -1,8 +1,6 @@
 //! This module contains an implementation of the Union Find datastructure,
 //! also called the Disjoint Set Union datastructure.
 
-use crate::*;
-
 /// A data structure for efficiently unioning sets of `usize`s.
 /// It also supports having each set map to a value, and merging them when their
 /// sets are unioned. If you don't want values, use () as the value and call `default`.
@@ -68,13 +66,12 @@ impl<'a, V> UnionFind<'a, V> {
         Ok(())
     }
 
-    /// Get the sets that this `UnionFind` is storing.
+    /// Get all of the values in this `UnionFind`.
     #[must_use]
-    pub fn partition(&self) -> HashMap<usize, Vec<usize>> {
-        let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
-        for key in 0..self.trees.len() {
-            out.entry(self.find(key).0).or_default().push(key);
-        }
-        out
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.trees.iter().filter_map(|x| match x {
+            ParentOrValue::Parent(_) => None,
+            ParentOrValue::Value(value) => Some(value),
+        })
     }
 }

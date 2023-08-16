@@ -6,79 +6,85 @@ use crate::*;
 /// all possible variable bindings that satisfy a multi-pattern.
 pub struct Query;
 
-#[derive(Debug)]
-enum InPattern {
-    /// A value.
-    Val(Value),
-    /// A table name and UnionFind keys.
-    Out(String, Vec<usize>),
-    /// A variable name.
-    Var(String),
-    /// A table name and column index.
-    Col(String, usize),
+#[derive(Debug, Default)]
+struct EqClass {
+    name: Option<String>,
+    value: Option<Value>,
+    columns: Vec<(String, usize)>,
 }
 
 impl Query {
     /// Construct a new `Query` from a multi-pattern.
-    pub fn new(patterns: &[Pattern]) -> Result<Query, String> {
-        fn eq_from_expr(
-            expr: &Expr,
-            names: &mut HashMap<usize, InPattern>,
-            eqs: &mut UnionFind<()>,
-        ) -> Result<usize, String> {
-            let key = eqs.new_key(());
-            match expr {
-                Expr::Unit => {
-                    names.insert(key, InPattern::Val(Value::Unit));
-                }
-                Expr::Int(i) => {
-                    names.insert(key, InPattern::Val(Value::Int(*i)));
-                }
-                Expr::Var(v) => {
-                    names.insert(key, InPattern::Var(v.clone()));
-                }
+    pub fn new(slice: &Slice, patterns: &[Pattern]) -> Result<Query, String> {
+        fn eq_from_expr(expr: &Expr, eqs: &mut UnionFind<EqClass>) -> Result<usize, String> {
+            Ok(match expr {
+                Expr::Unit => eqs.new_key(EqClass {
+                    value: Some(Value::Unit),
+                    ..EqClass::default()
+                }),
+                Expr::Int(i) => eqs.new_key(EqClass {
+                    value: Some(Value::Int(*i)),
+                    ..EqClass::default()
+                }),
+                Expr::Var(v) => eqs.new_key(EqClass {
+                    name: Some(v.clone()),
+                    ..EqClass::default()
+                }),
                 Expr::Call(f, xs) => {
-                    let xs = xs
-                        .iter()
-                        .enumerate()
-                        .map(|(i, x)| {
-                            let a = eq_from_expr(x, names, eqs)?;
-                            let b = eqs.new_key(());
-                            names.insert(b, InPattern::Col(f.clone(), i));
-                            eqs.union(a, b)?;
-                            Ok::<usize, String>(b)
-                        })
-                        .collect::<Result<_, _>>()?;
-                    names.insert(key, InPattern::Out(f.clone(), xs));
+                    for (i, x) in xs.iter().enumerate() {
+                        let a = eq_from_expr(x, eqs)?;
+                        let b = eqs.new_key(EqClass {
+                            columns: vec![(f.clone(), i)],
+                            ..EqClass::default()
+                        });
+                        eqs.union(a, b)?;
+                    }
+                    eqs.new_key(EqClass {
+                        columns: vec![(f.clone(), xs.len())],
+                        ..EqClass::default()
+                    })
                 }
-            }
-            Ok(key)
+            })
         }
 
-        // The values of the `UnionFind` are the names of the variables.
-        let mut eqs = UnionFind::default();
-        // Map from the keys of the UnionFind to the expressions they came from.
-        let mut names: HashMap<usize, InPattern> = HashMap::new();
+        let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
+            Ok(EqClass {
+                name: match (a.name, b.name) {
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                    (Some(a), Some(b)) => {
+                        return Err(format!("{a} and {b} refer to the same value in {slice}"))
+                    }
+                },
+                value: match (a.value, b.value) {
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                    (Some(a), Some(b)) if a == b => Some(a),
+                    (Some(a), Some(b)) => {
+                        return Err(format!("{a} and {b} are never equal in {slice}"))
+                    }
+                },
+                columns: {
+                    a.columns.append(&mut b.columns);
+                    a.columns
+                },
+            })
+        });
 
         for pattern in patterns {
             assert!(!pattern.0.is_empty());
 
-            let a = eq_from_expr(&pattern.0[0], &mut names, &mut eqs)?;
+            let a = eq_from_expr(&pattern.0[0], &mut eqs)?;
             for expr in &pattern.0[1..] {
-                let b = eq_from_expr(expr, &mut names, &mut eqs)?;
+                let b = eq_from_expr(expr, &mut eqs)?;
                 eqs.union(a, b)?;
             }
         }
 
-        let partition: Vec<Vec<_>> = eqs
-            .partition()
-            .values()
-            .map(|v| v.into_iter().map(|x| names.remove(x)).collect())
-            .collect();
+        let classes: Vec<_> = eqs.values().collect();
+        println!("{classes:#?}");
 
-        println!("{partition:?}");
-
-        todo!()
+        todo!("generate query")
     }
 
     /// Run this `Query` on the tables in the `Database`.
