@@ -42,16 +42,16 @@ fn run() -> Result<(), String> {
             Command::Function(_, f, xs, y, merge) => {
                 database.function(f, xs, y, merge)?;
             }
-            Command::Rule(_, patterns, actions) => {
-                database.rule(Query::new(&patterns)?, actions)?;
+            Command::Rule(slice, patterns, actions) => {
+                database.rule(Query::new(&slice, &patterns)?, actions)?;
             }
             Command::Action(action) => {
                 database.action(&action)?;
             }
             Command::Run(_) => database.run()?,
-            Command::Check(token, patterns) => {
-                if database.check(&Query::new(&patterns)?) {
-                    println!("failure: {token}");
+            Command::Check(slice, patterns) => {
+                if database.check(&Query::new(&slice, &patterns)?) {
+                    println!("failure: {slice}");
                 }
             }
         }
