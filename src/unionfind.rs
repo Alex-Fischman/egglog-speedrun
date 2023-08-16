@@ -66,12 +66,11 @@ impl<'a, V> UnionFind<'a, V> {
         Ok(())
     }
 
-    /// Get all of the values in this `UnionFind`.
-    #[must_use]
-    pub fn values(&self) -> impl Iterator<Item = &V> {
-        self.trees.iter().filter_map(|x| match x {
+    /// Get all of the canonical keys and their values in this `UnionFind`.
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &V)> {
+        self.trees.iter().enumerate().filter_map(|(k, v)| match v {
             ParentOrValue::Parent(_) => None,
-            ParentOrValue::Value(value) => Some(value),
+            ParentOrValue::Value(v) => Some((k, v)),
         })
     }
 }

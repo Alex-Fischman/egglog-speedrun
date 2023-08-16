@@ -31,6 +31,8 @@ impl Query {
                     ..EqClass::default()
                 }),
                 Expr::Call(f, xs) => {
+                    // todo: need some way to constrain that all of
+                    //       these keys are in the same row
                     for (i, x) in xs.iter().enumerate() {
                         let a = eq_from_expr(x, eqs)?;
                         let b = eqs.new_key(EqClass {
@@ -52,6 +54,7 @@ impl Query {
                 name: match (a.name, b.name) {
                     (Some(a), None) | (None, Some(a)) => Some(a),
                     (None, None) => None,
+                    (Some(a), Some(b)) if a == b => Some(a),
                     (Some(a), Some(b)) => {
                         return Err(format!("{a} and {b} refer to the same value in {slice}"))
                     }
@@ -71,6 +74,7 @@ impl Query {
             })
         });
 
+        // add constraints from each pattern individually
         for pattern in patterns {
             assert!(!pattern.0.is_empty());
 
@@ -81,7 +85,25 @@ impl Query {
             }
         }
 
-        let classes: Vec<_> = eqs.values().collect();
+        // add constraints across patterns when names are the same
+        let mut names_to_keys: HashMap<String, usize> = HashMap::new();
+        let mut to_union = Vec::new();
+        for (key, value) in eqs.iter() {
+            if let Some(name) = &value.name {
+                names_to_keys
+                    .entry(name.clone())
+                    .and_modify(|old| {
+                        to_union.push((*old, key));
+                        *old = key;
+                    })
+                    .or_insert(key);
+            }
+        }
+        for (a, b) in to_union {
+            eqs.union(a, b)?;
+        }
+
+        let classes: Vec<_> = eqs.iter().map(|t| t.1).collect();
         println!("{classes:#?}");
 
         todo!("generate query")
