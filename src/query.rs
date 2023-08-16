@@ -123,7 +123,7 @@ impl Query {
             }
             deps.retain(|k, _| !bucket.contains(k));
             // The bucket "has been computed", so remove all of its elements from deps.
-            for (_, ends) in &mut deps {
+            for ends in deps.values_mut() {
                 *ends = ends.difference(&bucket).copied().collect();
             }
             ordering.push(bucket);
