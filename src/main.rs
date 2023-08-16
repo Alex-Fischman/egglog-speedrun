@@ -10,8 +10,9 @@ pub mod expr;
 pub mod query;
 pub mod syntax;
 pub mod table;
+pub mod unionfind;
 
-pub use crate::{database::*, expr::*, query::*, syntax::*, table::*};
+pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::*};
 pub use std::collections::{HashMap, HashSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -39,14 +40,14 @@ fn run() -> Result<(), String> {
                 database.function(f, xs, y, merge)?;
             }
             Command::Rule(_, patterns, actions) => {
-                database.rule(Query::new(&patterns), actions)?;
+                database.rule(Query::new(&patterns)?, actions)?;
             }
             Command::Action(action) => {
                 database.action(&action)?;
             }
             Command::Run(_) => database.run()?,
             Command::Check(token, patterns) => {
-                if database.check(&Query::new(&patterns)) {
+                if database.check(&Query::new(&patterns)?) {
                     println!("failure: {token}");
                 }
             }
