@@ -84,18 +84,18 @@ impl Query {
             }
         }
 
-        // We're about to do stuff with canoncial keys, so make `eqs` immutable.
-        let eqs = eqs;
-
         // Change keys to canonical keys.
         let rows: HashSet<(String, Vec<_>)> = rows
             .into_iter()
-            .map(|(f, v)| (f, v.into_iter().map(|key| eqs.find(key).0).collect()))
+            .map(|(f, v)| (f, v.into_iter().map(|key| eqs.find(key)).collect()))
             .collect();
         let names_to_keys: HashMap<String, usize> = names_to_keys
             .into_iter()
-            .map(|(k, v)| (k, eqs.find(v[0]).0))
+            .map(|(k, v)| (k, eqs.find(v[0])))
             .collect();
+
+        // We're about to do stuff with canoncial keys, so make `eqs` immutable.
+        let eqs = eqs;
 
         // Dependency constraints, where each key is a canonical key in `eqs`, and
         // the value is the set of canonical keys that any of its `exprs` depend on.

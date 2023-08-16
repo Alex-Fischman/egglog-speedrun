@@ -38,19 +38,31 @@ impl<'a, V> UnionFind<'a, V> {
         self.trees.len() - 1
     }
 
-    /// Get the canonical key and value associated with the given key.
-    #[must_use]
-    pub fn find(&self, key: usize) -> (usize, &V) {
+    /// Get the canonical key associated with the given key.
+    pub fn find(&mut self, key: usize) -> usize {
         match &self.trees[key] {
-            ParentOrValue::Parent(key) => self.find(*key),
-            ParentOrValue::Value(value) => (key, value),
+            ParentOrValue::Value(_) => key,
+            ParentOrValue::Parent(parent) => {
+                let out = self.find(*parent);
+                self.trees[key] = ParentOrValue::Parent(out);
+                out
+            }
+        }
+    }
+
+    /// Get the value associated with the given key.
+    pub fn find_value(&mut self, key: usize) -> &V {
+        let key = self.find(key);
+        match &self.trees[key] {
+            ParentOrValue::Value(v) => v,
+            ParentOrValue::Parent(_) => unreachable!(), // key must be a root!
         }
     }
 
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
     pub fn union(&mut self, a: usize, b: usize) -> Result<(), String> {
-        let (a, _) = self.find(a);
-        let (b, _) = self.find(b);
+        let a = self.find(a);
+        let b = self.find(b);
         if a != b {
             // We want to move x and y into self.merge, so we swap them with a default value.
             // This is okay since we're about to replace them. (Luckily we have a default!)
@@ -69,7 +81,7 @@ impl<'a, V> UnionFind<'a, V> {
     /// Merge a new value into an existing set without creating a new key.
     pub fn merge(&mut self, key: usize, x: V) -> Result<(), String> {
         // See comments for `Database::union` on why we do it this way.
-        let (key, _) = self.find(key);
+        let key = self.find(key);
         let y = std::mem::replace(&mut self.trees[key], ParentOrValue::Parent(0));
         let z = match y {
             ParentOrValue::Value(y) => (self.merge)(x, y)?,
