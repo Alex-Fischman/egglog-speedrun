@@ -4,7 +4,13 @@ use crate::*;
 
 /// A `Query` is an object that takes the tables in a database and returns
 /// all possible variable bindings that satisfy a multi-pattern.
-pub struct Query;
+pub struct Query(Instructions);
+
+/// A list of lists of variable assignment instructions, where the inner lists
+/// can be reordered by `run` but the outer ones cannot (due to dependencies).
+struct Instructions(Vec<Vec<(String, Instruction)>>);
+
+enum Instruction {}
 
 #[derive(Default)]
 struct EqClass {
@@ -15,7 +21,12 @@ struct EqClass {
 
 impl Query {
     /// Construct a new `Query` from a multi-pattern.
-    pub fn new(funcs: &HashSet<&String>, patterns: &[Pattern]) -> Result<Query, String> {
+    pub fn new(
+        slice: &Slice,
+        funcs: &HashSet<&String>,
+        patterns: &[Pattern],
+    ) -> Result<Query, String> {
+        // Equality constraints among different expressions.
         let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
             Ok(EqClass {
                 names: {
@@ -35,7 +46,7 @@ impl Query {
 
         let mut rows = Vec::new();
 
-        // add constraints from each pattern individually
+        // Add equality constraints from each pattern individually.
         for pattern in patterns {
             assert!(!pattern.0.is_empty());
 
@@ -46,11 +57,11 @@ impl Query {
             }
         }
 
-        // add constraints across patterns when names are the same
+        // Add equality constraints across patterns when names are the same.
         let mut names_to_keys: HashMap<String, Vec<usize>> = HashMap::new();
         let mut to_union: Vec<(usize, usize)> = Vec::new();
-        for (key, value) in eqs.iter() {
-            for name in &value.names {
+        for (key, class) in eqs.iter() {
+            for name in &class.names {
                 let vec = names_to_keys.entry(name.clone()).or_default();
                 if let Some(old) = vec.last() {
                     to_union.push((*old, key));
@@ -61,6 +72,18 @@ impl Query {
         for (a, b) in to_union {
             eqs.union(a, b)?;
         }
+
+        // Do congruence closure; if functions have the same inputs, they have the same output.
+        // todo!
+
+        // We're about to do stuff with canoncial keys, so make `eqs` immutable.
+        let eqs = eqs;
+
+        // Change keys to canonical keys.
+        let rows: Vec<(String, Vec<_>)> = rows
+            .into_iter()
+            .map(|(f, v)| (f, v.into_iter().map(|key| eqs.find(key).0).collect()))
+            .collect();
         let names_to_keys: HashMap<String, usize> = names_to_keys
             .into_iter()
             .map(|(k, v)| (k, eqs.find(v[0]).0))
@@ -77,6 +100,27 @@ impl Query {
             deps.insert(key, set);
         }
 
+        // Use `deps` to put the keys into buckets, where bucket `i` must be computed before bucket `i+1`.
+        let mut ordering = Vec::new();
+        while !deps.is_empty() {
+            // Pull all keys with no dependencies out of `deps` and into `bucket`.
+            let bucket: HashSet<_> = deps
+                .iter()
+                .filter(|t| t.1.is_empty())
+                .map(|t| t.0)
+                .copied()
+                .collect();
+            if bucket.is_empty() {
+                return Err(format!("dependency cycle in {slice}"));
+            }
+            deps.retain(|k, _| !bucket.contains(k));
+            // The bucket "has been computed", so remove all of its elements from deps.
+            for (_, ends) in &mut deps {
+                *ends = ends.difference(&bucket).copied().collect();
+            }
+            ordering.push(bucket);
+        }
+
         for (_, class) in eqs.iter() {
             println!("names: {:?}", class.names);
             println!("exprs: {:?}", class.exprs);
@@ -86,9 +130,7 @@ impl Query {
         for row in rows {
             println!("row: {row:?}");
         }
-        for (key, deps) in deps {
-            println!("deps: {key} {deps:?}");
-        }
+        println!("ordering: {ordering:?}");
 
         todo!("generate query")
     }
