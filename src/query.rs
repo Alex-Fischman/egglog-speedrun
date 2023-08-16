@@ -4,15 +4,17 @@ use crate::*;
 
 /// A `Query` is an object that takes the tables in a database and returns
 /// all possible variable bindings that satisfy a multi-pattern.
-pub struct Query(Instructions);
+pub struct Query {
+    /// A list of `EqClasses`, each with a unique `usize` name.
+    classes: HashMap<usize, EqClass>,
+    /// A list of row constraints, where each class must come from the same row in the table.
+    rows: HashSet<(String, Vec<usize>)>,
+    /// A list of which classes to resolve first.
+    /// The `HashSet`s can be reordered by `run`, but the `Vec` cannot.
+    ordering: Vec<HashSet<usize>>,
+}
 
-/// A list of lists of variable assignment instructions, where the inner lists
-/// can be reordered by `run` but the outer ones cannot (due to dependencies).
-struct Instructions(Vec<Vec<(String, Instruction)>>);
-
-enum Instruction {}
-
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct EqClass {
     names: HashSet<String>,
     exprs: Vec<Expr>,
@@ -129,18 +131,11 @@ impl Query {
             ordering.push(bucket);
         }
 
-        for (_, class) in eqs.iter() {
-            println!("names: {:?}", class.names);
-            println!("exprs: {:?}", class.exprs);
-            println!("columns: {:?}", class.columns);
-            println!();
-        }
-        for row in rows {
-            println!("row: {row:?}");
-        }
-        println!("ordering: {ordering:?}");
-
-        todo!("generate query")
+        Ok(Query {
+            classes: eqs.iter().map(|(k, v)| (k, v.clone())).collect(),
+            rows,
+            ordering,
+        })
     }
 
     /// Run this `Query` on the tables in the `Database`.
@@ -148,6 +143,17 @@ impl Query {
         &self,
         _funcs: &HashMap<String, Table>,
     ) -> impl Iterator<Item = HashMap<&str, Value>> {
+        for class in self.classes.values() {
+            println!("names: {:?}", class.names);
+            println!("exprs: {:?}", class.exprs);
+            println!("columns: {:?}", class.columns);
+            println!();
+        }
+        for row in &self.rows {
+            println!("row: {row:?}");
+        }
+        println!("ordering: {:?}", self.ordering);
+
         // // per pattern, per row, list of assignments
         // let binding: Vec<Vec<Vec<(&str, Value)>>> = patterns
         //     .iter()
