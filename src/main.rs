@@ -4,6 +4,9 @@
 #![deny(missing_docs)]
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::many_single_char_names)]
 
 pub mod database;
 pub mod expr;

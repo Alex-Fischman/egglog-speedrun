@@ -139,7 +139,6 @@ impl Table {
     }
 
     /// Get all of the rows that have a specific value in a specific column.
-    #[allow(clippy::type_complexity)]
     pub fn rows_with_value<'a>(
         &'a self,
         value: Value,

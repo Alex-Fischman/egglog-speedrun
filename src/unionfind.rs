@@ -50,7 +50,6 @@ impl<'a, V> UnionFind<'a, V> {
     }
 
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
-    #[allow(clippy::many_single_char_names)]
     pub fn union(&mut self, a: usize, b: usize) -> Result<(), String> {
         let (a, _) = self.find(a);
         let (b, _) = self.find(b);
