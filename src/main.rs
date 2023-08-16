@@ -7,10 +7,11 @@
 
 pub mod database;
 pub mod expr;
+pub mod query;
 pub mod syntax;
 pub mod table;
 
-pub use crate::{database::*, expr::*, syntax::*, table::*};
+pub use crate::{database::*, expr::*, query::*, syntax::*, table::*};
 pub use std::collections::{HashMap, HashSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -38,7 +39,7 @@ fn run() -> Result<(), String> {
                 database.function(f, xs, y, merge)?;
             }
             Command::Rule(_, patterns, actions) => {
-                database.rule(patterns, actions)?;
+                database.rule(Query::new(&patterns), actions)?;
             }
             Command::Action(action) => {
                 database.action(&action)?;

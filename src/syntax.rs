@@ -211,7 +211,7 @@ impl<'a> Sexp<'a> {
 
     fn to_pattern(&self) -> Result<Pattern, String> {
         match self {
-            Sexp::List(token, list) => match list.as_slice() {
+            Sexp::List(_, list) => match list.as_slice() {
                 [Sexp::Atom(eq), args @ ..] if eq.as_str() == "=" => Ok(Pattern(
                     args.iter().map(Sexp::to_expr).collect::<Result<_, _>>()?,
                 )),
@@ -297,7 +297,7 @@ impl<'a> Sexp<'a> {
                                 .iter()
                                 .map(Sexp::to_pattern)
                                 .collect::<Result<Vec<_>, _>>()?;
-                            let mut actions: Vec<_> = match list.remove(2) {
+                            let actions: Vec<_> = match list.remove(2) {
                                 Sexp::List(_, actions) => actions
                                     .into_iter()
                                     .map(Sexp::to_action)
