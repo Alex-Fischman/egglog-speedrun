@@ -248,26 +248,3 @@ impl<'a> Iterator for Bindings<'a> {
         todo!()
     }
 }
-
-/*
-
-for reorderable in ordering {
-    let ordering = reorderable.into_iter().collect()
-}
-
-
-*/
-
-// fn multi_cartesian_product<T: Clone>(vecs: Vec<Vec<T>>) -> Vec<Vec<T>> {
-//     vecs.into_iter().fold(vec![vec![]], |xss, ys| {
-//         let mut out = Vec::new();
-//         for xs in xss {
-//             for y in &ys {
-//                 let mut xs = xs.clone();
-//                 xs.push(y.clone());
-//                 out.push(xs);
-//             }
-//         }
-//         out
-//     })
-// }
