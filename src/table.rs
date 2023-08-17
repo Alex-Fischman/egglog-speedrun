@@ -3,6 +3,7 @@
 use crate::*;
 
 /// A single function in an `egglog` program.
+#[derive(Clone)]
 pub struct Table {
     /// The name of this table in the database.
     name: String,

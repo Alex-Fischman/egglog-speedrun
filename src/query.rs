@@ -139,59 +139,13 @@ impl Query {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    pub fn run(
-        &self,
-        _funcs: &HashMap<String, Table>,
-    ) -> impl Iterator<Item = HashMap<&str, Value>> {
-        for class in self.classes.values() {
-            println!("names: {:?}", class.names);
-            println!("exprs: {:?}", class.exprs);
-            println!("columns: {:?}", class.columns);
-            println!();
+    #[must_use]
+    pub fn run<'a>(&'a self, funcs: &'a HashMap<String, Table>) -> Bindings {
+        Bindings {
+            query: self,
+            vars: HashMap::new(),
+            funcs,
         }
-        for row in &self.rows {
-            println!("row: {row:?}");
-        }
-        println!("ordering: {:?}", self.ordering);
-
-        // // per pattern, per row, list of assignments
-        // let binding: Vec<Vec<Vec<(&str, Value)>>> = patterns
-        //     .iter()
-        //     .map(|pattern| {
-        //         self.funcs[&pattern.f]
-        //             .rows()
-        //             .map(|(xs, _)| {
-        //                 pattern
-        //                     .xs
-        //                     .iter()
-        //                     .zip(xs)
-        //                     .map(|(a, b)| (a.as_str(), *b))
-        //                     .collect()
-        //             })
-        //             .collect()
-        //     })
-        //     .collect();
-        // // per rows, per pattern, assignments
-        // let bindings = multi_cartesian_product(binding);
-        // // flatten, filter out non-matching assignments, convert to hashmaps
-        // let bindings = bindings.into_iter().filter_map(|binding| {
-        //     let mut out: HashMap<&str, Value> = HashMap::new();
-        //     for assignments in binding {
-        //         for (key, value) in assignments {
-        //             if let Some(v) = out.get(key) {
-        //                 if *v != value {
-        //                     return None;
-        //                 }
-        //             } else {
-        //                 out.insert(key, value);
-        //             }
-        //         }
-        //     }
-        //     Some(out)
-        // });
-
-        todo!("run query");
-        [].into_iter()
     }
 }
 
@@ -252,6 +206,23 @@ fn deps_from_expr(
         }
         Expr::Call(_, xs) => xs.iter().for_each(|x| deps_from_expr(x, names, deps)),
         Expr::Unit | Expr::Int(_) | Expr::Var(_) => {}
+    }
+}
+
+/// An iterator over all possible variable assignments that match `query`.
+pub struct Bindings<'a> {
+    /// The `Query` that constructed this iterator.
+    query: &'a Query,
+    /// The map of variable assignments to return from this iterator.
+    vars: HashMap<&'a str, Value>,
+    /// The current state of the `Table`s in the `Database`.
+    funcs: &'a HashMap<String, Table>,
+}
+
+impl<'a> Iterator for Bindings<'a> {
+    type Item = &'a HashMap<&'a str, Value>;
+    fn next(&mut self) -> Option<&'a HashMap<&'a str, Value>> {
+        todo!()
     }
 }
 

@@ -79,10 +79,11 @@ impl<'a> Database<'a> {
         let mut changed = true;
         while changed {
             changed = false;
+            let pre = self.funcs.clone();
             for (query, actions) in &self.rules {
-                for binding in query.run(&self.funcs) {
+                for binding in query.run(&pre) {
                     for action in actions {
-                        if run_action(action, &binding, &mut self.funcs)? {
+                        if run_action(action, binding, &mut self.funcs)? {
                             changed = true;
                         }
                     }
