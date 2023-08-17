@@ -17,10 +17,8 @@ pub struct Table {
     primary: Vec<(Vec<Value>, Value, bool)>,
     /// The rows in this table indexed by all of the input columns.
     function: HashMap<Vec<Value>, RowId>,
-    /// The rows in this table indexed by each input column.
-    input_columns: Vec<HashMap<Value, HashSet<RowId>>>,
-    /// The rows in this table indexed by the output column.
-    output_column: HashMap<Value, HashSet<RowId>>,
+    /// The rows in this table indexed by the values in each column.
+    columns: Vec<HashMap<Value, HashSet<RowId>>>,
 }
 
 type RowId = usize;
@@ -48,8 +46,7 @@ impl Table {
         Table {
             primary: Vec::new(),
             function: HashMap::new(),
-            input_columns: vec![HashMap::new(); inputs.len()],
-            output_column: HashMap::new(),
+            columns: vec![HashMap::new(); inputs.len() + 1],
             name,
             inputs,
             output,
@@ -77,15 +74,21 @@ impl Table {
         }
     }
 
+    /// Get the number of live rows in the table.
+    #[allow(clippy::len_without_is_empty)]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.function.len()
+    }
+
     /// Adds a row to the table, assuming that `xs` is not already present.
     fn append_row(&mut self, xs: &[Value], y: Value) {
         let id = self.primary.len();
         self.primary.push((xs.to_vec(), y, true));
         self.function.insert(xs.to_vec(), id);
-        for (input_column, x) in self.input_columns.iter_mut().zip(xs) {
-            input_column.entry(*x).or_default().insert(id);
+        for (column, x) in self.columns.iter_mut().zip(xs.iter().chain([&y])) {
+            column.entry(*x).or_default().insert(id);
         }
-        self.output_column.entry(y).or_default().insert(id);
     }
 
     /// Removes a row from the table by marking it as dead.
@@ -93,10 +96,9 @@ impl Table {
         let (xs, y, live) = &mut self.primary[id];
         *live = false;
         self.function.remove(xs);
-        for (input_column, x) in self.input_columns.iter_mut().zip(xs) {
-            input_column.get_mut(x).unwrap().remove(&id);
+        for (column, x) in self.columns.iter_mut().zip(xs.iter().chain([&*y])) {
+            column.get_mut(x).unwrap().remove(&id);
         }
-        self.output_column.get_mut(y).unwrap().remove(&id);
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
@@ -145,12 +147,11 @@ impl Table {
         value: Value,
         column: usize,
     ) -> Result<Box<dyn Iterator<Item = (&[Value], Value)> + 'a>, String> {
-        let index = match column {
-            i if i < self.inputs.len() => &self.input_columns[i],
-            i if i == self.inputs.len() => &self.output_column,
-            i => return Err(format!("invalid column index {i} for {}", self.name)),
-        };
-        let iter: Box<dyn Iterator<Item = (&[Value], Value)>> = match index.get(&value) {
+        let column = self
+            .columns
+            .get(column)
+            .ok_or(format!("invalid column index {column} for {}", self.name))?;
+        let iter: Box<dyn Iterator<Item = (&[Value], Value)>> = match column.get(&value) {
             Some(set) => Box::new(
                 set.iter()
                     .map(|id| &self.primary[*id])
