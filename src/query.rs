@@ -9,9 +9,8 @@ pub struct Query {
     classes: HashMap<usize, EqClass>,
     /// A list of row constraints, where each class must come from the same row in the table.
     rows: HashSet<(String, Vec<usize>)>,
-    /// A list of which classes to resolve first.
-    /// The `HashSet`s can be reordered by `run`, but the `Vec` cannot.
-    ordering: Vec<HashSet<usize>>,
+    /// The ordering in which to resolve `classes`.
+    ordering: Vec<usize>,
 }
 
 #[derive(Clone, Default)]
@@ -96,22 +95,24 @@ impl Query {
             .map(|(k, v)| (k, eqs.find(v[0])))
             .collect();
 
-        // We're about to do stuff with canoncial keys, so make `eqs` immutable.
-        let eqs = eqs;
+        // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
+        let classes: HashMap<_, _> = eqs.iter().map(|(k, v)| (k, v.clone())).collect();
+        drop(eqs);
 
         // Dependency constraints, where each key is a canonical key in `eqs`, and
         // the value is the set of canonical keys that any of its `exprs` depend on.
-        let mut deps = HashMap::new();
-        for (key, class) in eqs.iter() {
+        let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
+        for (key, class) in &classes {
             let mut set = HashSet::new();
             for expr in &class.exprs {
                 deps_from_expr(expr, &names_to_keys, &mut set);
             }
-            deps.insert(key, set);
+            deps.insert(*key, set);
         }
 
-        // Use `deps` to put the keys into buckets, where bucket `i` must be computed before bucket `i+1`.
-        let mut ordering = Vec::new();
+        // Use `deps` to put the keys into buckets, where
+        // bucket `i` must be computed before bucket `i+1`.
+        let mut ordering: Vec<usize> = Vec::new();
         while !deps.is_empty() {
             // Pull all keys with no dependencies out of `deps` and into `bucket`.
             let bucket: HashSet<_> = deps
@@ -128,11 +129,18 @@ impl Query {
             for ends in deps.values_mut() {
                 *ends = ends.difference(&bucket).copied().collect();
             }
-            ordering.push(bucket);
+            // For each bucket, sort its elements by:
+            //  1) if they have `exprs`, we can compute them directly and filter
+            //  2) if they have multiple `columns`, we can use the column indices
+            let mut bucket: Vec<_> = bucket.into_iter().collect();
+            bucket.sort_by_key(|i| {
+                std::cmp::Reverse((classes[i].exprs.len(), classes[i].columns.len()))
+            });
+            ordering.append(&mut bucket);
         }
 
         Ok(Query {
-            classes: eqs.iter().map(|(k, v)| (k, v.clone())).collect(),
+            classes,
             rows,
             ordering,
         })
@@ -140,7 +148,11 @@ impl Query {
 
     /// Run this `Query` on the tables in the `Database`.
     #[must_use]
-    pub fn run<'a>(&'a self, funcs: &'a HashMap<String, Table>) -> Bindings {
+    pub fn run<'a>(&'a mut self, funcs: &'a HashMap<String, Table>) -> Bindings<'a> {
+        // Sort the columns in the classes by table size, which we didn't know until now.
+        self.classes
+            .values_mut()
+            .for_each(|class| class.columns.sort_by_key(|(name, _)| funcs[name].len()));
         Bindings {
             query: self,
             vars: HashMap::new(),
@@ -209,9 +221,9 @@ fn deps_from_expr(
     }
 }
 
-/// An iterator over all possible variable assignments that match `query`.
+/// An iterator over all possible variable assignments that match a `Query`.
 pub struct Bindings<'a> {
-    /// The `Query` that constructed this iterator.
+    /// The query that generated this iterator.
     query: &'a Query,
     /// The map of variable assignments to return from this iterator.
     vars: HashMap<&'a str, Value>,
@@ -222,9 +234,29 @@ pub struct Bindings<'a> {
 impl<'a> Iterator for Bindings<'a> {
     type Item = &'a HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<&'a HashMap<&'a str, Value>> {
+        for class in self.query.classes.values() {
+            println!("names: {:?}", class.names);
+            println!("exprs: {:?}", class.exprs);
+            println!("columns: {:?}", class.columns);
+            println!();
+        }
+        for row in &self.query.rows {
+            println!("row: {row:?}");
+        }
+        println!("ordering: {:?}", self.query.ordering);
+
         todo!()
     }
 }
+
+/*
+
+for reorderable in ordering {
+    let ordering = reorderable.into_iter().collect()
+}
+
+
+*/
 
 // fn multi_cartesian_product<T: Clone>(vecs: Vec<Vec<T>>) -> Vec<Vec<T>> {
 //     vecs.into_iter().fold(vec![vec![]], |xss, ys| {
