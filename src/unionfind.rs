@@ -116,17 +116,32 @@ impl<'a, V> UnionFind<'a, V> {
 
 impl<V> IntoIterator for UnionFind<'_, V> {
     type Item = (usize, V);
-    type IntoIter = std::iter::FilterMap<
+    type IntoIter = Canonical<V>;
+    fn into_iter(self) -> Canonical<V> {
+        Canonical(
+            self.trees
+                .into_iter()
+                .enumerate()
+                .filter_map(|(k, v)| match v {
+                    Node::Child(_) => None,
+                    Node::Root(v, _) => Some((k, v)),
+                }),
+        )
+    }
+}
+
+/// An iterator over the canonical keys and values of a `UnionFind`.
+// We could inline this, but we use it to hide the private `Node` type.
+pub struct Canonical<V>(
+    std::iter::FilterMap<
         std::iter::Enumerate<std::vec::IntoIter<Node<V>>>,
         fn((usize, Node<V>)) -> Option<(usize, V)>,
-    >;
-    fn into_iter(self) -> <Self as IntoIterator>::IntoIter {
-        self.trees
-            .into_iter()
-            .enumerate()
-            .filter_map(|(k, v)| match v {
-                Node::Child(_) => None,
-                Node::Root(v, _) => Some((k, v)),
-            })
+    >,
+);
+
+impl<V> Iterator for Canonical<V> {
+    type Item = (usize, V);
+    fn next(&mut self) -> Option<(usize, V)> {
+        self.0.next()
     }
 }
