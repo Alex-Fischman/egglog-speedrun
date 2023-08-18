@@ -96,8 +96,7 @@ impl Query {
             .collect();
 
         // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
-        let classes: HashMap<_, _> = eqs.iter().map(|(k, v)| (k, v.clone())).collect();
-        drop(eqs);
+        let classes: HashMap<_, _> = eqs.into_iter().collect();
 
         // Dependency constraints, where each key is a canonical key in `eqs`, and
         // the value is the set of canonical keys that any of its `exprs` depend on.

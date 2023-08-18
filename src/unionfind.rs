@@ -113,3 +113,20 @@ impl<'a, V> UnionFind<'a, V> {
         })
     }
 }
+
+impl<V> IntoIterator for UnionFind<'_, V> {
+    type Item = (usize, V);
+    type IntoIter = std::iter::FilterMap<
+        std::iter::Enumerate<std::vec::IntoIter<Node<V>>>,
+        fn((usize, Node<V>)) -> Option<(usize, V)>,
+    >;
+    fn into_iter(self) -> <Self as IntoIterator>::IntoIter {
+        self.trees
+            .into_iter()
+            .enumerate()
+            .filter_map(|(k, v)| match v {
+                Node::Child(_) => None,
+                Node::Root(v, _) => Some((k, v)),
+            })
+    }
+}
