@@ -152,11 +152,18 @@ impl Query {
         self.classes
             .values_mut()
             .for_each(|class| class.columns.sort_by_key(|(name, _)| funcs[name].len()));
-        Bindings {
-            query: self,
-            vars: HashMap::new(),
-            funcs,
+        for class in self.ordering.iter().map(|class| &self.classes[class]) {
+            println!("names: {:?}", class.names);
+            println!("exprs: {:?}", class.exprs);
+            println!("columns: {:?}", class.columns);
+            println!();
         }
+        for row in &self.rows {
+            println!("row constraint: {row:?}");
+        }
+        println!("ordering: {:?}", self.ordering);
+
+        Bindings { query: self, funcs }
     }
 }
 
@@ -224,26 +231,31 @@ fn deps_from_expr(
 pub struct Bindings<'a> {
     /// The query that generated this iterator.
     query: &'a Query,
-    /// The map of variable assignments to return from this iterator.
-    vars: HashMap<&'a str, Value>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'a HashMap<String, Table>,
 }
 
 impl<'a> Iterator for Bindings<'a> {
-    type Item = &'a HashMap<&'a str, Value>;
-    fn next(&mut self) -> Option<&'a HashMap<&'a str, Value>> {
-        for class in self.query.classes.values() {
-            println!("names: {:?}", class.names);
-            println!("exprs: {:?}", class.exprs);
-            println!("columns: {:?}", class.columns);
-            println!();
+    type Item = HashMap<&'a str, Value>;
+    fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
+        let mut vars = HashMap::new();
+        'match_failed: for class in &self.query.ordering {
+            let class = &self.query.classes[class];
+            let mut value = None;
+            for expr in &class.exprs {
+                match (value, expr.evaluate(&vars, self.funcs).unwrap()) {
+                    (None, v) => value = Some(v),
+                    (Some(value), v) if value == v => {}
+                    (Some(_), _) => break 'match_failed,
+                }
+            }
+            for _column in &class.columns {
+                todo!("columns: need to get every possible combination of what goes here somehow")
+            }
+            for name in &class.names {
+                vars.insert(name, value.unwrap());
+            }
         }
-        for row in &self.query.rows {
-            println!("row: {row:?}");
-        }
-        println!("ordering: {:?}", self.query.ordering);
-
-        todo!()
+        Some(vars)
     }
 }

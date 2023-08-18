@@ -83,7 +83,7 @@ impl<'a> Database<'a> {
             for (query, actions) in &mut self.rules {
                 for binding in query.run(&pre) {
                     for action in &mut *actions {
-                        if run_action(action, binding, &mut self.funcs)? {
+                        if run_action(action, &binding, &mut self.funcs)? {
                             changed = true;
                         }
                     }
