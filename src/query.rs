@@ -245,14 +245,14 @@ impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
         let mut vars = HashMap::new();
-        'match_failed: for class in &self.query.ordering {
+        for class in &self.query.ordering {
             let class = &self.query.classes[class];
             let mut value = None;
             for expr in &class.exprs {
                 match (value, expr.evaluate(&vars, self.funcs).unwrap()) {
                     (None, v) => value = Some(v),
                     (Some(value), v) if value == v => {}
-                    (Some(_), _) => break 'match_failed,
+                    (Some(_), _) => return self.next(),
                 }
             }
             for _column in &class.columns {
