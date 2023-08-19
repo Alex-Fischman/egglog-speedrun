@@ -138,6 +138,12 @@ impl Query {
             ordering.append(&mut bucket);
         }
 
+        for class in classes.values() {
+            if class.exprs.is_empty() && class.columns.is_empty() {
+                return Err(format!("unconstrained value in {slice}"));
+            }
+        }
+
         Ok(Query {
             classes,
             rows,
