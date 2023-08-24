@@ -142,7 +142,7 @@ impl Table {
     }
 
     /// Get all of the rows that have a specific value in a specific column.
-    pub fn rows_with_value<'a>(
+    pub fn rows_with_value_in_column<'a>(
         &'a self,
         value: Value,
         column: usize,

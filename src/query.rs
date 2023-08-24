@@ -142,7 +142,6 @@ impl Query {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    #[must_use]
     pub fn run<'a>(&'a self, funcs: &'a HashMap<String, Table>) -> Result<Bindings<'a>, String> {
         // Sort rows by table size
         let mut rows: Vec<_> = self.rows.iter().collect();
@@ -189,7 +188,7 @@ impl Query {
         // Compute the initial trie from the instructions
         let mut trie: Vec<Layer> = Vec::new();
         let mut values: HashMap<usize, Value> = HashMap::new();
-        for instruction in &instructions {
+        for instruction in instructions.clone() {
             let mut layer: Layer = instruction.to_layer(&self.classes, &values, funcs)?;
             for (&class, &value) in layer.peek().unwrap() {
                 values.insert(class, value);
@@ -272,7 +271,7 @@ pub struct Bindings<'a> {
 type Layer<'a> = std::iter::Peekable<Box<dyn 'a + Iterator<Item = HashMap<usize, Value>>>>;
 
 /// An instruction to generate one layer of the trie.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Instruction {
     /// Iterate over all rows in a table
     Row {
@@ -315,20 +314,40 @@ fn values_to_vars<'a>(
 }
 
 impl Instruction {
+    #[allow(clippy::wrong_self_convention)]
     fn to_layer<'a>(
-        &self,
+        self,
         classes: &HashMap<usize, EqClass>,
         values: &HashMap<usize, Value>,
-        funcs: &HashMap<String, Table>,
+        funcs: &'a HashMap<String, Table>,
     ) -> Result<Layer<'a>, String> {
         Ok(match self {
-            Instruction::Row {
-                table: _,
-                classes: _,
-            } => todo!(), //Box::new(classes.iter().zip(funcs[table].rows())),
-            Instruction::RowWithColumnFilter { .. } => todo!(),
+            Instruction::Row { table, classes } => {
+                Box::new(funcs[&table].rows().map(move |(inputs, output)| {
+                    classes
+                        .iter()
+                        .copied()
+                        .zip(inputs.iter().copied().chain([output]))
+                        .collect()
+                })) as Box<dyn Iterator<Item = _>>
+            }
+            Instruction::RowWithColumnFilter {
+                table,
+                classes,
+                column,
+            } => Box::new(
+                funcs[&table]
+                    .rows_with_value_in_column(values[&classes[column]], column)?
+                    .map(move |(inputs, output)| {
+                        classes
+                            .iter()
+                            .copied()
+                            .zip(inputs.iter().copied().chain([output]))
+                            .collect()
+                    }),
+            ) as Box<dyn Iterator<Item = _>>,
             Instruction::Expr { expr, class } => Box::new(std::iter::once(HashMap::from([(
-                *class,
+                class,
                 expr.evaluate(&values_to_vars(classes, values), funcs)?,
             )]))) as Box<dyn Iterator<Item = _>>,
         }
