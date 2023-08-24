@@ -13,9 +13,9 @@ pub struct Query {
     ordering: Vec<usize>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct EqClass {
-    names: HashSet<String>,
+    name: Option<String>,
     exprs: Vec<Expr>,
     columns: Vec<(String, usize)>,
 }
@@ -30,9 +30,13 @@ impl Query {
         // Equality constraints among different expressions.
         let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
             Ok(EqClass {
-                names: {
-                    a.names.extend(b.names);
-                    a.names
+                name: match (a.name, b.name) {
+                    (Some(a), Some(b)) if a == b => Some(a),
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                    (Some(a), Some(b)) => {
+                        return Err(format!("{a} and {b} refer to the same value in {slice}"))
+                    }
                 },
                 exprs: {
                     a.exprs.append(&mut b.exprs);
@@ -62,9 +66,9 @@ impl Query {
         let mut names_to_keys: HashMap<String, Vec<usize>> = HashMap::new();
         let mut to_union: Vec<(usize, usize)> = Vec::new();
         for (key, class) in eqs.iter() {
-            for name in &class.names {
+            if let Some(name) = &class.name {
                 let vec = names_to_keys.entry(name.clone()).or_default();
-                if let Some(old) = vec.last() {
+                if let Some(old) = vec.first() {
                     to_union.push((*old, key));
                 }
                 vec.push(key);
@@ -159,7 +163,7 @@ impl Query {
             .values_mut()
             .for_each(|class| class.columns.sort_by_key(|(name, _)| funcs[name].len()));
         for class in self.ordering.iter().map(|class| &self.classes[class]) {
-            println!("names: {:?}", class.names);
+            println!("name: {:?}", class.name);
             println!("exprs: {:?}", class.exprs);
             println!("columns: {:?}", class.columns);
             println!();
@@ -185,7 +189,7 @@ fn eqs_from_expr(
 ) -> Result<usize, String> {
     Ok(match expr {
         Expr::Var(var) => eqs.new_key(EqClass {
-            names: HashSet::from([var.clone()]),
+            name: Some(var.clone()),
             ..EqClass::default()
         }),
         Expr::Call(f, xs) if funcs.contains(f) => {
@@ -258,7 +262,7 @@ impl<'a> Iterator for Bindings<'a> {
             for _column in &class.columns {
                 todo!("columns: need to get every possible combination of what goes here somehow")
             }
-            for name in &class.names {
+            for name in &class.name {
                 vars.insert(name, value.unwrap());
             }
         }
