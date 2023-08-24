@@ -17,7 +17,6 @@ pub struct Query {
 struct EqClass {
     name: Option<String>,
     exprs: Vec<Expr>,
-    columns: Vec<(String, usize)>,
 }
 
 impl Query {
@@ -41,10 +40,6 @@ impl Query {
                 exprs: {
                     a.exprs.append(&mut b.exprs);
                     a.exprs
-                },
-                columns: {
-                    a.columns.append(&mut b.columns);
-                    a.columns
                 },
             })
         });
@@ -132,20 +127,11 @@ impl Query {
             for ends in deps.values_mut() {
                 *ends = ends.difference(&bucket).copied().collect();
             }
-            // For each bucket, sort its elements by:
-            //  1) if they have `exprs`, we can compute them directly and filter
-            //  2) if they have multiple `columns`, we can use the column indices
+            // For each bucket, sort its elements (mostly for determinism)
             let mut bucket: Vec<_> = bucket.into_iter().collect();
-            bucket.sort_by_key(|i| {
-                std::cmp::Reverse((classes[i].exprs.len(), classes[i].columns.len()))
-            });
-            ordering.append(&mut bucket);
-        }
+            bucket.sort_by_key(|i| std::cmp::Reverse(classes[i].exprs.len()));
 
-        for class in classes.values() {
-            if class.exprs.is_empty() && class.columns.is_empty() {
-                return Err(format!("unconstrained value in {slice}"));
-            }
+            ordering.append(&mut bucket);
         }
 
         Ok(Query {
@@ -158,14 +144,9 @@ impl Query {
     /// Run this `Query` on the tables in the `Database`.
     #[must_use]
     pub fn run<'a>(&'a mut self, funcs: &'a HashMap<String, Table>) -> Bindings<'a> {
-        // Sort the columns in the classes by table size, which we didn't know until now.
-        self.classes
-            .values_mut()
-            .for_each(|class| class.columns.sort_by_key(|(name, _)| funcs[name].len()));
         for class in self.ordering.iter().map(|class| &self.classes[class]) {
             println!("name: {:?}", class.name);
             println!("exprs: {:?}", class.exprs);
-            println!("columns: {:?}", class.columns);
             println!();
         }
         for row in &self.rows {
@@ -196,20 +177,11 @@ fn eqs_from_expr(
             let mut row = Vec::new();
             for (i, x) in xs.iter().enumerate() {
                 let x = eqs_from_expr(x, funcs, eqs, rows)?;
-                eqs.merge(
-                    x,
-                    EqClass {
-                        columns: vec![(f.clone(), i)],
-                        ..EqClass::default()
-                    },
-                )?;
                 row.push(x);
             }
-            let y = eqs.new_key(EqClass {
-                columns: vec![(f.clone(), xs.len())],
-                ..EqClass::default()
-            });
+            let y = eqs.new_key(EqClass::default());
             row.push(y);
+
             rows.push((f.clone(), row));
             y
         }
@@ -248,24 +220,25 @@ pub struct Bindings<'a> {
 impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
-        let mut vars = HashMap::new();
-        for class in &self.query.ordering {
-            let class = &self.query.classes[class];
-            let mut value = None;
-            for expr in &class.exprs {
-                match (value, expr.evaluate(&vars, self.funcs).unwrap()) {
-                    (None, v) => value = Some(v),
-                    (Some(value), v) if value == v => {}
-                    (Some(_), _) => return self.next(),
-                }
-            }
-            for _column in &class.columns {
-                todo!("columns: need to get every possible combination of what goes here somehow")
-            }
-            for name in &class.name {
-                vars.insert(name, value.unwrap());
-            }
-        }
-        Some(vars)
+        todo!()
+        // let mut vars = HashMap::new();
+        // for class in &self.query.ordering {
+        //     let class = &self.query.classes[class];
+        //     let mut value = None;
+        //     for expr in &class.exprs {
+        //         match (value, expr.evaluate(&vars, self.funcs).unwrap()) {
+        //             (None, v) => value = Some(v),
+        //             (Some(value), v) if value == v => {}
+        //             (Some(_), _) => return self.next(),
+        //         }
+        //     }
+        //     for _column in &class.columns {
+        //         todo!("columns: need to get every possible combination of what goes here somehow")
+        //     }
+        //     for name in &class.name {
+        //         vars.insert(name, value.unwrap());
+        //     }
+        // }
+        // Some(vars)
     }
 }
