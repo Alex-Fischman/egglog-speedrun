@@ -50,7 +50,7 @@ fn run() -> Result<(), String> {
             }
             Command::Run(_) => database.run()?,
             Command::Check(slice, patterns) => {
-                if database.check(&mut Query::new(&slice, &database.funcs(), &patterns)?) {
+                if database.check(&mut Query::new(&slice, &database.funcs(), &patterns)?)? {
                     println!("failure: {slice}");
                 }
             }

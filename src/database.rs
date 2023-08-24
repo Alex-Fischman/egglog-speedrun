@@ -70,8 +70,8 @@ impl<'a> Database<'a> {
     }
 
     /// Get the value of `expr` given the functions in this `Database`.
-    pub fn check(&mut self, query: &mut Query) -> bool {
-        query.run(&self.funcs).next().is_some()
+    pub fn check(&mut self, query: &mut Query) -> Result<bool, String> {
+        Ok(query.run(&self.funcs)?.next().is_some())
     }
 
     /// Run the rules in this `Database` to fixpoint.
@@ -81,7 +81,7 @@ impl<'a> Database<'a> {
             changed = false;
             let pre = self.funcs.clone();
             for (query, actions) in &mut self.rules {
-                for binding in query.run(&pre) {
+                for binding in query.run(&pre)? {
                     for action in &mut *actions {
                         if run_action(action, &binding, &mut self.funcs)? {
                             changed = true;

@@ -143,7 +143,7 @@ impl Query {
 
     /// Run this `Query` on the tables in the `Database`.
     #[must_use]
-    pub fn run<'a>(&'a mut self, funcs: &'a HashMap<String, Table>) -> Bindings<'a> {
+    pub fn run<'a>(&'a self, funcs: &'a HashMap<String, Table>) -> Result<Bindings<'a>, String> {
         // Sort rows by table size
         let mut rows: Vec<_> = self.rows.iter().collect();
         rows.sort_by_key(|(table, _)| funcs[table].len());
@@ -186,11 +186,23 @@ impl Query {
                 known.insert(class);
             }
         }
+        // Compute the initial trie from the instructions
+        let mut trie: Vec<Layer> = Vec::new();
+        let mut values: HashMap<usize, Value> = HashMap::new();
+        for instruction in &instructions {
+            let mut layer: Layer = instruction.to_layer(&self.classes, &values, funcs)?;
+            for (&class, &value) in layer.peek().unwrap() {
+                values.insert(class, value);
+            }
+            trie.push(layer);
+        }
 
-        Bindings {
+        Ok(Bindings {
+            classes: &self.classes,
             instructions,
             funcs,
-        }
+            trie,
+        })
     }
 }
 
@@ -247,11 +259,17 @@ fn deps_from_expr(
 
 /// An iterator over all possible variable assignments that match a `Query`.
 pub struct Bindings<'a> {
-    /// The instructions to generate the trie.
-    instructions: Vec<Instruction>,
+    /// See `Query`.
+    classes: &'a HashMap<usize, EqClass>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'a HashMap<String, Table>,
+    /// The instructions to generate the trie.
+    instructions: Vec<Instruction>,
+    /// A lazy trie over the bindings.
+    trie: Vec<Layer<'a>>,
 }
+
+type Layer<'a> = std::iter::Peekable<Box<dyn 'a + Iterator<Item = HashMap<usize, Value>>>>;
 
 /// An instruction to generate one layer of the trie.
 #[derive(Debug)]
@@ -279,6 +297,43 @@ enum Instruction {
         /// The class to check the expression against
         class: usize,
     },
+}
+
+fn values_to_vars<'a>(
+    classes: &'a HashMap<usize, EqClass>,
+    values: &HashMap<usize, Value>,
+) -> HashMap<&'a str, Value> {
+    values
+        .iter()
+        .filter_map(|(class, value)| {
+            classes[class]
+                .name
+                .as_ref()
+                .map(|name| (name.as_str(), *value))
+        })
+        .collect()
+}
+
+impl Instruction {
+    fn to_layer<'a>(
+        &self,
+        classes: &HashMap<usize, EqClass>,
+        values: &HashMap<usize, Value>,
+        funcs: &HashMap<String, Table>,
+    ) -> Result<Layer<'a>, String> {
+        Ok(match self {
+            Instruction::Row {
+                table: _,
+                classes: _,
+            } => todo!(), //Box::new(classes.iter().zip(funcs[table].rows())),
+            Instruction::RowWithColumnFilter { .. } => todo!(),
+            Instruction::Expr { expr, class } => Box::new(std::iter::once(HashMap::from([(
+                *class,
+                expr.evaluate(&values_to_vars(classes, values), funcs)?,
+            )]))) as Box<dyn Iterator<Item = _>>,
+        }
+        .peekable())
+    }
 }
 
 impl<'a> Iterator for Bindings<'a> {
