@@ -148,7 +148,7 @@ impl Query {
         rows.sort_by_key(|(table, _)| funcs[table].len());
 
         // Compute instructions
-        // todo: interleave rows and ordering
+        // todo: interleave rows and ordering instructions
         let mut instructions = Vec::new();
         let mut known: HashSet<usize> = HashSet::new();
         // Compute instructions for rows
@@ -185,22 +185,12 @@ impl Query {
                 known.insert(class);
             }
         }
-        // Compute the initial trie from the instructions
-        let mut trie: Vec<Layer> = Vec::new();
-        let mut values: HashMap<usize, Value> = HashMap::new();
-        for instruction in instructions.clone() {
-            let mut layer: Layer = instruction.to_layer(&self.classes, &values, funcs)?;
-            for (&class, &value) in layer.peek().unwrap() {
-                values.insert(class, value);
-            }
-            trie.push(layer);
-        }
 
         Ok(Bindings {
+            trie: build_trie(&instructions, &self.classes, &mut HashMap::new(), funcs)?,
             classes: &self.classes,
             instructions,
             funcs,
-            trie,
         })
     }
 }
@@ -298,6 +288,23 @@ enum Instruction {
     },
 }
 
+fn build_trie<'a>(
+    instructions: &[Instruction],
+    classes: &HashMap<usize, EqClass>,
+    values: &mut HashMap<usize, Value>,
+    funcs: &'a HashMap<String, Table>,
+) -> Result<Vec<Layer<'a>>, String> {
+    let mut trie: Vec<Layer> = Vec::new();
+    for instruction in instructions {
+        let mut layer: Layer = instruction.clone().to_layer(classes, &values, funcs)?;
+        for (&class, &value) in layer.peek().unwrap() {
+            values.insert(class, value);
+        }
+        trie.push(layer);
+    }
+    Ok(trie)
+}
+
 fn values_to_vars<'a>(
     classes: &'a HashMap<usize, EqClass>,
     values: &HashMap<usize, Value>,
@@ -314,6 +321,7 @@ fn values_to_vars<'a>(
 }
 
 impl Instruction {
+    // Can never return an empty iterator
     #[allow(clippy::wrong_self_convention)]
     fn to_layer<'a>(
         self,
@@ -358,25 +366,16 @@ impl Instruction {
 impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
-        todo!()
-        // let mut vars = HashMap::new();
-        // for class in &self.query.ordering {
-        //     let class = &self.query.classes[class];
-        //     let mut value = None;
-        //     for expr in &class.exprs {
-        //         match (value, expr.evaluate(&vars, self.funcs).unwrap()) {
-        //             (None, v) => value = Some(v),
-        //             (Some(value), v) if value == v => {}
-        //             (Some(_), _) => return self.next(),
-        //         }
-        //     }
-        //     for _column in &class.columns {
-        //         todo!("columns: need to get every possible combination of what goes here somehow")
-        //     }
-        //     for name in &class.name {
-        //         vars.insert(name, value.unwrap());
-        //     }
-        // }
-        // Some(vars)
+        // Get the current value of the trie
+        let mut values: HashMap<usize, Value> = HashMap::new();
+        for layer in &mut self.trie {
+            for (&class, &value) in layer.peek().unwrap() {
+                values.insert(class, value);
+            }
+        }
+        // Move to the next value of the trie
+        todo!("move to the next value of the trie");
+
+        Some(values_to_vars(self.classes, &values))
     }
 }
