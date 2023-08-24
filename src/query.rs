@@ -144,17 +144,53 @@ impl Query {
     /// Run this `Query` on the tables in the `Database`.
     #[must_use]
     pub fn run<'a>(&'a mut self, funcs: &'a HashMap<String, Table>) -> Bindings<'a> {
-        for class in self.ordering.iter().map(|class| &self.classes[class]) {
-            println!("name: {:?}", class.name);
-            println!("exprs: {:?}", class.exprs);
-            println!();
-        }
-        for row in &self.rows {
-            println!("row constraint: {row:?}");
-        }
-        println!("ordering: {:?}", self.ordering);
+        // Sort rows by table size
+        let mut rows: Vec<_> = self.rows.iter().collect();
+        rows.sort_by_key(|(table, _)| funcs[table].len());
 
-        Bindings { query: self, funcs }
+        // Compute instructions
+        // todo: interleave rows and ordering
+        let mut instructions = Vec::new();
+        let mut known: HashSet<usize> = HashSet::new();
+        // Compute instructions for rows
+        for (table, classes) in rows {
+            let known_columns: Vec<usize> = classes
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|(_, class)| known.contains(class))
+                .map(|(column, _)| column)
+                .collect();
+            instructions.push(match known_columns.as_slice() {
+                [] => Instruction::Row {
+                    table: table.clone(),
+                    classes: classes.clone(),
+                },
+                &[column, ..] => Instruction::RowWithColumnFilter {
+                    table: table.clone(),
+                    classes: classes.clone(),
+                    column,
+                },
+            });
+            for &class in classes {
+                known.insert(class);
+            }
+        }
+        // Compute instructions for ordering
+        for &class in &self.ordering {
+            for expr in &self.classes[&class].exprs {
+                instructions.push(Instruction::Expr {
+                    expr: expr.clone(),
+                    class,
+                });
+                known.insert(class);
+            }
+        }
+
+        Bindings {
+            instructions,
+            funcs,
+        }
     }
 }
 
@@ -175,7 +211,7 @@ fn eqs_from_expr(
         }),
         Expr::Call(f, xs) if funcs.contains(f) => {
             let mut row = Vec::new();
-            for (i, x) in xs.iter().enumerate() {
+            for x in xs {
                 let x = eqs_from_expr(x, funcs, eqs, rows)?;
                 row.push(x);
             }
@@ -211,10 +247,38 @@ fn deps_from_expr(
 
 /// An iterator over all possible variable assignments that match a `Query`.
 pub struct Bindings<'a> {
-    /// The query that generated this iterator.
-    query: &'a Query,
+    /// The instructions to generate the trie.
+    instructions: Vec<Instruction>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'a HashMap<String, Table>,
+}
+
+/// An instruction to generate one layer of the trie.
+#[derive(Debug)]
+enum Instruction {
+    /// Iterate over all rows in a table
+    Row {
+        /// The name of the table to iterate over
+        table: String,
+        /// The classes to map the values in the columns into
+        classes: Vec<usize>,
+    },
+    /// Iterate over all rows in a table with a value in a column
+    RowWithColumnFilter {
+        /// Same as Row
+        table: String,
+        /// Same as Row
+        classes: Vec<usize>,
+        /// The column to filter on, using the value of `classes[column]`
+        column: usize,
+    },
+    /// Compute an expression
+    Expr {
+        /// The expression to evaluate
+        expr: Expr,
+        /// The class to check the expression against
+        class: usize,
+    },
 }
 
 impl<'a> Iterator for Bindings<'a> {
