@@ -187,7 +187,7 @@ impl Query {
         }
 
         Ok(Bindings {
-            trie: build_trie(&instructions, &self.classes, &mut HashMap::new(), funcs)?,
+            trie: build_trie(&instructions, &self.classes, HashMap::new(), funcs)?,
             classes: &self.classes,
             instructions,
             funcs,
@@ -291,7 +291,7 @@ enum Instruction {
 fn build_trie<'a>(
     instructions: &[Instruction],
     classes: &HashMap<usize, EqClass>,
-    values: &mut HashMap<usize, Value>,
+    mut values: HashMap<usize, Value>,
     funcs: &'a HashMap<String, Table>,
 ) -> Result<Vec<Layer<'a>>, String> {
     let mut trie: Vec<Layer> = Vec::new();
@@ -367,15 +367,35 @@ impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
         // Get the current value of the trie
-        let mut values: HashMap<usize, Value> = HashMap::new();
+        let mut out: HashMap<usize, Value> = HashMap::new();
         for layer in &mut self.trie {
+            for (&class, &value) in layer.peek().unwrap() {
+                out.insert(class, value);
+            }
+        }
+        // Find the last unfinished iterator and advance it
+        // If they're all finished then we're done
+        let advanced = match self.trie.iter_mut().rposition(|iter| iter.next().is_some()) {
+            None => return None,
+            Some(i) => i,
+        };
+        // Get the current value of the trie up to the advanced iterator
+        let mut values: HashMap<usize, Value> = HashMap::new();
+        for layer in &mut self.trie[0..=advanced] {
             for (&class, &value) in layer.peek().unwrap() {
                 values.insert(class, value);
             }
         }
-        // Move to the next value of the trie
-        todo!("move to the next value of the trie");
+        // Build the new children of the advanced iterator
+        let layers = build_trie(
+            &self.instructions[advanced + 1..],
+            self.classes,
+            values,
+            self.funcs,
+        )
+        .unwrap();
+        self.trie.splice(advanced + 1.., layers);
 
-        Some(values_to_vars(self.classes, &values))
+        Some(values_to_vars(self.classes, &out))
     }
 }
