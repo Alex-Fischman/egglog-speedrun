@@ -9,7 +9,7 @@ pub struct Query {
     classes: HashMap<usize, EqClass>,
     /// A list of row constraints, where each class must come from the same row in the table.
     rows: HashSet<(String, Vec<usize>)>,
-    /// The ordering in which to resolve `classes`.
+    /// The ordering in which to resolve the `Expr`s in `classes`.
     ordering: Vec<usize>,
 }
 
@@ -187,10 +187,10 @@ impl Query {
         }
 
         Ok(Bindings {
-            trie: build_trie(&instructions, &self.classes, HashMap::new(), funcs)?,
             classes: &self.classes,
-            instructions,
             funcs,
+            instructions,
+            trie: vec![],
         })
     }
 }
@@ -252,16 +252,14 @@ pub struct Bindings<'a> {
     classes: &'a HashMap<usize, EqClass>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'a HashMap<String, Table>,
-    /// The instructions to generate the trie.
+    /// The `Instruction`s to generate each layer in the trie.
     instructions: Vec<Instruction>,
     /// A lazy trie over the bindings.
-    trie: Vec<Layer<'a>>,
+    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = HashMap<usize, Value>> + 'a>>>,
 }
 
-type Layer<'a> = std::iter::Peekable<Box<dyn 'a + Iterator<Item = HashMap<usize, Value>>>>;
-
 /// An instruction to generate one layer of the trie.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Instruction {
     /// Iterate over all rows in a table
     Row {
@@ -288,114 +286,37 @@ enum Instruction {
     },
 }
 
-fn build_trie<'a>(
-    instructions: &[Instruction],
-    classes: &HashMap<usize, EqClass>,
-    mut values: HashMap<usize, Value>,
-    funcs: &'a HashMap<String, Table>,
-) -> Result<Vec<Layer<'a>>, String> {
-    let mut trie: Vec<Layer> = Vec::new();
-    for instruction in instructions {
-        let mut layer: Layer = instruction.clone().to_layer(classes, &values, funcs)?;
-        for (&class, &value) in layer.peek().unwrap() {
-            values.insert(class, value);
-        }
-        trie.push(layer);
-    }
-    Ok(trie)
-}
-
-fn values_to_vars<'a>(
-    classes: &'a HashMap<usize, EqClass>,
-    values: &HashMap<usize, Value>,
-) -> HashMap<&'a str, Value> {
-    values
-        .iter()
-        .filter_map(|(class, value)| {
-            classes[class]
-                .name
-                .as_ref()
-                .map(|name| (name.as_str(), *value))
-        })
-        .collect()
-}
-
-impl Instruction {
-    // Can never return an empty iterator
-    #[allow(clippy::wrong_self_convention)]
-    fn to_layer<'a>(
-        self,
-        classes: &HashMap<usize, EqClass>,
-        values: &HashMap<usize, Value>,
-        funcs: &'a HashMap<String, Table>,
-    ) -> Result<Layer<'a>, String> {
-        Ok(match self {
-            Instruction::Row { table, classes } => {
-                Box::new(funcs[&table].rows().map(move |(inputs, output)| {
-                    classes
-                        .iter()
-                        .copied()
-                        .zip(inputs.iter().copied().chain([output]))
-                        .collect()
-                })) as Box<dyn Iterator<Item = _>>
-            }
-            Instruction::RowWithColumnFilter {
-                table,
-                classes,
-                column,
-            } => Box::new(
-                funcs[&table]
-                    .rows_with_value_in_column(values[&classes[column]], column)?
-                    .map(move |(inputs, output)| {
-                        classes
-                            .iter()
-                            .copied()
-                            .zip(inputs.iter().copied().chain([output]))
-                            .collect()
-                    }),
-            ) as Box<dyn Iterator<Item = _>>,
-            Instruction::Expr { expr, class } => Box::new(std::iter::once(HashMap::from([(
-                class,
-                expr.evaluate(&values_to_vars(classes, values), funcs)?,
-            )]))) as Box<dyn Iterator<Item = _>>,
-        }
-        .peekable())
+impl<'a> Bindings<'a> {
+    fn values_to_vars(&self, values: &HashMap<usize, Value>) -> HashMap<&str, Value> {
+        values
+            .iter()
+            .filter_map(|(class, value)| {
+                self.classes[class]
+                    .name
+                    .as_ref()
+                    .map(|name| (name.as_str(), *value))
+            })
+            .collect()
     }
 }
 
 impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
-        // Get the current value of the trie
-        let mut out: HashMap<usize, Value> = HashMap::new();
-        for layer in &mut self.trie {
-            for (&class, &value) in layer.peek().unwrap() {
-                out.insert(class, value);
-            }
-        }
-        // Find the last unfinished iterator and advance it
-        // If they're all finished then we're done
-        let advanced = match self.trie.iter_mut().rposition(|iter| iter.next().is_some()) {
-            None => return None,
-            Some(i) => i,
+        // Advance iterators starting at the leaf until we find one that has another element.
+        // If none of them can be advanced, we're done. Otherwise, we need to rebuild the trie
+        // from the instruction above the one that worked. There's a special case though; if the
+        // trie vec is empty, we're on the first iteration, and we need build the whole thing.
+        let _build_from = if self.trie.is_empty() {
+            0
+        } else if let Some(i) = self.trie.iter_mut().rposition(|iter| iter.next().is_some()) {
+            i + 1
+        } else {
+            return None;
         };
-        // Get the current value of the trie up to the advanced iterator
-        let mut values: HashMap<usize, Value> = HashMap::new();
-        for layer in &mut self.trie[0..=advanced] {
-            for (&class, &value) in layer.peek().unwrap() {
-                values.insert(class, value);
-            }
-        }
-        // Build the new children of the advanced iterator
-        let layers = build_trie(
-            &self.instructions[advanced + 1..],
-            self.classes,
-            values,
-            self.funcs,
-        )
-        .unwrap();
-        self.trie.splice(advanced + 1.., layers);
 
-        Some(values_to_vars(self.classes, &out))
+        // Build the missing layers of the trie.
+
+        todo!()
     }
 }
