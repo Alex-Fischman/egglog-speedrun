@@ -292,7 +292,7 @@ impl<'a> Bindings<'a> {
             // the previous height and then rebuild this height using the new `values` map.
             self.trie[height] = self.instructions[height]
                 .clone()
-                .as_iter(self, values)?
+                .to_iter(self, values)?
                 .peekable();
             // Now try to advance the rebuilt layer.
             self.advance(height)
@@ -305,7 +305,7 @@ impl<'a> Bindings<'a> {
 
 impl Instruction {
     #[allow(clippy::wrong_self_convention)]
-    fn as_iter<'a>(
+    fn to_iter<'a>(
         self,
         bindings: &Bindings<'a>,
         values: HashMap<usize, Value>,
