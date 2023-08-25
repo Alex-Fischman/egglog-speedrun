@@ -39,8 +39,9 @@ fn run() -> Result<(), String> {
             Command::Sort(_, sort) => {
                 database.sort(sort)?;
             }
-            Command::Function(_, f, xs, y, merge) => {
-                database.function(f, xs, y, merge)?;
+            Command::Function(_, f, mut xs, y, merge) => {
+                xs.push(y);
+                database.function(f, xs, merge)?;
             }
             Command::Rule(slice, patterns, actions) => {
                 database.rule(Query::new(&slice, &database.funcs(), &patterns)?, actions)?;
@@ -50,7 +51,7 @@ fn run() -> Result<(), String> {
             }
             Command::Run(_) => database.run()?,
             Command::Check(slice, patterns) => {
-                if database.check(&mut Query::new(&slice, &database.funcs(), &patterns)?)? {
+                if database.check(&Query::new(&slice, &database.funcs(), &patterns)?)? {
                     println!("failure: {slice}");
                 }
             }

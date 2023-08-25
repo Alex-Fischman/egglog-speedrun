@@ -13,11 +13,11 @@ pub struct Database<'a> {
 impl Display for Database<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         for (f_, table) in &self.funcs {
-            for (xs, y) in table.rows() {
+            for row in table.rows() {
                 writeln!(
                     f,
-                    "{f_}: {}: {y}",
-                    xs.iter()
+                    "{f_}: {}",
+                    row.iter()
                         .map(|x| format!("{x}"))
                         .collect::<Vec<_>>()
                         .join(" ")
@@ -42,14 +42,13 @@ impl<'a> Database<'a> {
     pub fn function(
         &mut self,
         f: String,
-        xs: Vec<Type>,
-        y: Type,
+        schema: Vec<Type>,
         merge: Option<Expr>,
     ) -> Result<&mut Database<'a>, String> {
         if self.funcs.contains_key(&f) {
             return Err(format!("{f} was declared twice"));
         }
-        self.funcs.insert(f.clone(), Table::new(f, xs, y, merge));
+        self.funcs.insert(f.clone(), Table::new(f, schema, merge));
         Ok(self)
     }
 
@@ -70,8 +69,12 @@ impl<'a> Database<'a> {
     }
 
     /// Get the value of `expr` given the functions in this `Database`.
-    pub fn check(&mut self, query: &mut Query) -> Result<bool, String> {
-        Ok(query.run(&self.funcs)?.next().is_some())
+    pub fn check(&self, query: &Query) -> Result<bool, String> {
+        match query.run(&self.funcs)?.next() {
+            Some(Ok(_)) => Ok(true),
+            None => Ok(false),
+            Some(Err(e)) => Err(e),
+        }
     }
 
     /// Run the rules in this `Database` to fixpoint.
@@ -81,9 +84,10 @@ impl<'a> Database<'a> {
             changed = false;
             let pre = self.funcs.clone();
             for (query, actions) in &mut self.rules {
-                for binding in query.run(&pre)? {
+                for vars in query.run(&pre)? {
+                    let vars = vars?;
                     for action in &mut *actions {
-                        if run_action(action, &binding, &mut self.funcs)? {
+                        if run_action(action, &vars, &mut self.funcs)? {
                             changed = true;
                         }
                     }

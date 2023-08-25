@@ -78,7 +78,7 @@ impl Query {
             for (g, g_cols) in &rows[i + 1..] {
                 let f_y = f_cols.len() - 1;
                 let g_y = g_cols.len() - 1;
-                if f == g && f_cols[0..f_y] == g_cols[0..g_y] {
+                if f == g && f_cols[..f_y] == g_cols[..g_y] {
                     eqs.union(f_cols[f_y], g_cols[g_y])?;
                 }
             }
@@ -148,32 +148,14 @@ impl Query {
         rows.sort_by_key(|(table, _)| funcs[table].len());
 
         // Compute instructions
-        // todo: interleave rows and ordering instructions
+        // todo: interleave rows and ordering instructions more efficiently
         let mut instructions = Vec::new();
-        let mut known: HashSet<usize> = HashSet::new();
         // Compute instructions for rows
         for (table, classes) in rows {
-            let known_columns: Vec<usize> = classes
-                .iter()
-                .copied()
-                .enumerate()
-                .filter(|(_, class)| known.contains(class))
-                .map(|(column, _)| column)
-                .collect();
-            instructions.push(match known_columns.as_slice() {
-                [] => Instruction::Row {
-                    table: table.clone(),
-                    classes: classes.clone(),
-                },
-                &[column, ..] => Instruction::RowWithColumnFilter {
-                    table: table.clone(),
-                    classes: classes.clone(),
-                    column,
-                },
+            instructions.push(Instruction::Row {
+                table: table.clone(),
+                classes: classes.clone(),
             });
-            for &class in classes {
-                known.insert(class);
-            }
         }
         // Compute instructions for ordering
         for &class in &self.ordering {
@@ -182,7 +164,6 @@ impl Query {
                     expr: expr.clone(),
                     class,
                 });
-                known.insert(class);
             }
         }
 
@@ -268,15 +249,6 @@ enum Instruction {
         /// The classes to map the values in the columns into
         classes: Vec<usize>,
     },
-    /// Iterate over all rows in a table with a value in a column
-    RowWithColumnFilter {
-        /// Same as Row
-        table: String,
-        /// Same as Row
-        classes: Vec<usize>,
-        /// The column to filter on, using the value of `classes[column]`
-        column: usize,
-    },
     /// Compute an expression
     Expr {
         /// The expression to evaluate
@@ -318,7 +290,10 @@ impl<'a> Bindings<'a> {
         } else if let Some(values) = self.advance(height - 1)? {
             // If we don't have a value and we're not at the bottom of the trie, advance
             // the previous height and then rebuild this height using the new `values` map.
-            self.trie[height] = self.instructions[height].as_iter(self, &values)?.peekable();
+            self.trie[height] = self.instructions[height]
+                .clone()
+                .as_iter(self, values)?
+                .peekable();
             // Now try to advance the rebuilt layer.
             self.advance(height)
         } else {
@@ -329,34 +304,54 @@ impl<'a> Bindings<'a> {
 }
 
 impl Instruction {
-    fn as_iter(
-        &self,
-        bindings: &Bindings,
-        values: &HashMap<usize, Value>,
-    ) -> Result<Box<dyn Iterator<Item = HashMap<usize, Value>>>, String> {
-        Ok(match self {
-            Instruction::Expr { expr, class } => {
-                let value = expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs)?;
-                match values.get(class) {
-                    Some(v) if *v != value => Box::new(std::iter::empty()),
-                    _ => Box::new(std::iter::once(HashMap::from([(*class, value)]))),
+    #[allow(clippy::wrong_self_convention)]
+    fn as_iter<'a>(
+        self,
+        bindings: &Bindings<'a>,
+        values: HashMap<usize, Value>,
+    ) -> Result<Box<dyn Iterator<Item = HashMap<usize, Value>> + 'a>, String> {
+        let iter: Box<dyn Iterator<Item = _>> = match self {
+            Instruction::Row { table, classes } => {
+                let known_column = classes
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, c)| values.get(c).map(|v| (i, v)));
+                match known_column {
+                    None => Box::new(bindings.funcs[&table].rows().map(move |row| {
+                        classes.iter().copied().zip(row.iter().copied()).collect()
+                    })),
+                    Some((column, value)) => Box::new(
+                        bindings.funcs[&table]
+                            .rows_with_value_in_column(*value, column)?
+                            .map(move |row| {
+                                classes.iter().copied().zip(row.iter().copied()).collect()
+                            }),
+                    ),
                 }
             }
-            _ => todo!(),
-        })
+            Instruction::Expr { expr, class } => {
+                let value = expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs)?;
+                Box::new(std::iter::once(HashMap::from([(class, value)])))
+            }
+        };
+        Ok(Box::new(iter.filter(move |map: &HashMap<usize, Value>| {
+            map.iter()
+                .all(|(class, value)| !matches!(values.get(class), Some(v) if *v != *value))
+        })))
     }
 }
 
 impl<'a> Iterator for Bindings<'a> {
-    type Item = HashMap<&'a str, Value>;
-    fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
+    type Item = Result<HashMap<&'a str, Value>, String>;
+    fn next(&mut self) -> Option<Result<HashMap<&'a str, Value>, String>> {
         if self.trie.is_empty() {
             todo!("build the initial tree and return")
         } else {
-            self.advance(self.instructions.len() - 1)
-                .unwrap()
-                .as_ref()
-                .map(|values| self.values_to_vars(values))
+            match self.advance(self.instructions.len() - 1) {
+                Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
+                Ok(None) => None,
+                Err(e) => Some(Err(e)),
+            }
         }
     }
 }
