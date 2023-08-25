@@ -290,10 +290,7 @@ impl<'a> Bindings<'a> {
         } else if let Some(values) = self.advance(height - 1)? {
             // If we don't have a value and we're not at the bottom of the trie, advance
             // the previous height and then rebuild this height using the new `values` map.
-            self.trie[height] = self.instructions[height]
-                .clone()
-                .to_iter(self, values)?
-                .peekable();
+            self.trie[height] = self.instructions[height].iter(self, values)?.peekable();
             // Now try to advance the rebuilt layer.
             self.advance(height)
         } else {
@@ -304,34 +301,43 @@ impl<'a> Bindings<'a> {
 }
 
 impl Instruction {
-    #[allow(clippy::wrong_self_convention)]
-    fn to_iter<'a>(
-        self,
+    fn iter<'a>(
+        &self,
         bindings: &Bindings<'a>,
         values: HashMap<usize, Value>,
     ) -> Result<Box<dyn Iterator<Item = HashMap<usize, Value>> + 'a>, String> {
-        let iter: Box<dyn Iterator<Item = _>> = match self {
+        let iter: Box<dyn Iterator<Item = _> + 'a> = match self {
             Instruction::Row { table, classes } => {
                 let known_column = classes
                     .iter()
                     .enumerate()
                     .find_map(|(i, c)| values.get(c).map(|v| (i, v)));
+                let table = &bindings.funcs[table];
+                let classes = classes.clone();
                 match known_column {
-                    None => Box::new(bindings.funcs[&table].rows().map(move |row| {
-                        classes.iter().copied().zip(row.iter().copied()).collect()
+                    None => Box::new(table.rows().map(move |row| {
+                        classes
+                            .clone()
+                            .into_iter()
+                            .zip(row.iter().copied())
+                            .collect()
                     })),
                     Some((column, value)) => Box::new(
-                        bindings.funcs[&table]
-                            .rows_with_value_in_column(*value, column)?
+                        table
+                            .rows_with_value_in_column(*value, column)
                             .map(move |row| {
-                                classes.iter().copied().zip(row.iter().copied()).collect()
+                                classes
+                                    .clone()
+                                    .into_iter()
+                                    .zip(row.iter().copied())
+                                    .collect()
                             }),
                     ),
                 }
             }
             Instruction::Expr { expr, class } => {
                 let value = expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs)?;
-                Box::new(std::iter::once(HashMap::from([(class, value)])))
+                Box::new(std::iter::once(HashMap::from([(*class, value)])))
             }
         };
         Ok(Box::new(iter.filter(move |map: &HashMap<usize, Value>| {

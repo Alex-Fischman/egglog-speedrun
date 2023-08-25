@@ -156,23 +156,19 @@ impl Table {
     }
 
     /// Get all of the rows that have a specific value in a specific column.
+    #[must_use]
     pub fn rows_with_value_in_column<'a>(
         &'a self,
         value: Value,
         column: usize,
-    ) -> Result<Box<dyn Iterator<Item = &[Value]> + 'a>, String> {
-        let column = self
-            .columns
-            .get(column)
-            .ok_or(format!("invalid column index {column} for {}", self.name))?;
-        let iter: Box<dyn Iterator<Item = &[Value]>> = match column.get(&value) {
+    ) -> Box<dyn Iterator<Item = &[Value]> + 'a> {
+        match self.columns[column].get(&value) {
             Some(set) => Box::new(
                 set.iter()
                     .map(|id| &self.primary[*id])
                     .map(|(row, _)| row.as_slice()),
             ),
             None => Box::new(std::iter::empty()),
-        };
-        Ok(iter)
+        }
     }
 }
