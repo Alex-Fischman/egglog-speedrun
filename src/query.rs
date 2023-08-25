@@ -274,30 +274,56 @@ impl<'a> Bindings<'a> {
             .collect()
     }
 
-    /// Advance the lazy trie up to `height` to the next value.
-    fn advance(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
-        // Advance the specified iterator to the next value.
-        if let Some(result) = self.trie[height].next() {
-            result?;
-            // If we have a value, then great! Build the values map and return it.
-            let mut values: HashMap<usize, Value> = HashMap::new();
-            for iter in &mut self.trie[..=height] {
-                for (&class, &value) in iter.peek().unwrap().as_ref()? {
-                    values.insert(class, value);
-                }
+    /// Get the current values map up to and including `height`.
+    fn values(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
+        let mut values = if height == 0 {
+            HashMap::new()
+        } else if let Some(values) = self.values(height - 1)? {
+            values
+        } else {
+            return Ok(None);
+        };
+
+        if let Some(result) = self.trie[height].peek() {
+            for (&class, &value) in result.as_ref()? {
+                values.insert(class, value);
             }
             Ok(Some(values))
+        } else if let Some(vs) = self.advance(height)? {
+            for (class, value) in vs {
+                values.insert(class, value);
+            }
+            Ok(Some(values))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Build a single layer of the trie.
+    fn build(&mut self, height: usize, values: HashMap<usize, Value>) {
+        match height.cmp(&self.trie.len()) {
+            // trie has been built
+            std::cmp::Ordering::Less => assert_eq!(None, self.trie[height].peek()),
+            // trie is being built
+            std::cmp::Ordering::Equal => self
+                .trie
+                .push((Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>).peekable()),
+            // this should never happen
+            std::cmp::Ordering::Greater => panic!(),
+        }
+        self.trie[height] = self.instructions[height].iter(self, values).peekable();
+    }
+
+    /// Advance the lazy trie up to `height` to the next value.
+    fn advance(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
+        if self.trie[height].next().is_some() {
+            self.values(height)
         } else if height == 0 {
-            // If we don't have a value and we're at the bottom of the trie, we're done.
             Ok(None)
         } else if let Some(values) = self.advance(height - 1)? {
-            // If we don't have a value and we're not at the bottom of the trie, advance
-            // the previous height and then rebuild this height using the new `values` map.
-            self.trie[height] = self.instructions[height].iter(self, values).peekable();
-            // Now try to advance the rebuilt layer.
-            self.advance(height)
+            self.build(height, values);
+            self.values(height)
         } else {
-            // If the recursive call said that we're done, then we're done.
             Ok(None)
         }
     }
@@ -378,14 +404,27 @@ impl Instruction {
 impl<'a> Iterator for Bindings<'a> {
     type Item = Result<HashMap<&'a str, Value>, String>;
     fn next(&mut self) -> Option<Result<HashMap<&'a str, Value>, String>> {
-        if self.trie.is_empty() {
-            todo!("build the initial tree and return")
-        } else {
-            match self.advance(self.instructions.len() - 1) {
-                Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
+        // fun with nesting
+        match if self.trie.is_empty() {
+            for i in 0..self.instructions.len() {
+                let values = if i == 0 {
+                    HashMap::new()
+                } else {
+                    match self.values(i - 1) {
+                        Ok(Some(values)) => values,
+                        Ok(None) => return None,
+                        Err(e) => return Some(Err(e)),
+                    }
+                };
+                self.build(i, values);
             }
+            self.values(self.instructions.len() - 1)
+        } else {
+            self.advance(self.instructions.len() - 1)
+        } {
+            Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
         }
     }
 }
