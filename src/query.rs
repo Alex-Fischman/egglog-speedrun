@@ -236,7 +236,9 @@ pub struct Bindings<'a> {
     /// The `Instruction`s to generate each layer in the trie.
     instructions: Vec<Instruction>,
     /// A lazy trie over the bindings.
-    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = HashMap<usize, Value>> + 'a>>>,
+    trie: Vec<
+        std::iter::Peekable<Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a>>,
+    >,
 }
 
 /// An instruction to generate one layer of the trie.
@@ -275,11 +277,12 @@ impl<'a> Bindings<'a> {
     /// Advance the lazy trie up to `height` to the next value.
     fn advance(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
         // Advance the specified iterator to the next value.
-        if self.trie[height].next().is_some() {
+        if let Some(result) = self.trie[height].next() {
+            result?;
             // If we have a value, then great! Build the values map and return it.
             let mut values: HashMap<usize, Value> = HashMap::new();
             for iter in &mut self.trie[..=height] {
-                for (&class, &value) in iter.peek().unwrap() {
+                for (&class, &value) in iter.peek().unwrap().as_ref()? {
                     values.insert(class, value);
                 }
             }
@@ -290,7 +293,7 @@ impl<'a> Bindings<'a> {
         } else if let Some(values) = self.advance(height - 1)? {
             // If we don't have a value and we're not at the bottom of the trie, advance
             // the previous height and then rebuild this height using the new `values` map.
-            self.trie[height] = self.instructions[height].iter(self, values)?.peekable();
+            self.trie[height] = self.instructions[height].iter(self, values).peekable();
             // Now try to advance the rebuilt layer.
             self.advance(height)
         } else {
@@ -305,45 +308,70 @@ impl Instruction {
         &self,
         bindings: &Bindings<'a>,
         values: HashMap<usize, Value>,
-    ) -> Result<Box<dyn Iterator<Item = HashMap<usize, Value>> + 'a>, String> {
-        let iter: Box<dyn Iterator<Item = _> + 'a> = match self {
+    ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
+        match self {
             Instruction::Row { table, classes } => {
                 let known_column = classes
                     .iter()
                     .enumerate()
-                    .find_map(|(i, c)| values.get(c).map(|v| (i, v)));
+                    .find_map(|(i, c)| values.get(c).map(|v| (i, *v)));
                 let table = &bindings.funcs[table];
                 let classes = classes.clone();
+                let filter_map = move |result: Result<HashMap<usize, Value>, String>| match result {
+                    Err(e) => Some(Err(e)),
+                    Ok(map) => {
+                        let mut values = values.clone();
+                        if map.iter().all(|(class, value)| {
+                            if let Some(v) = values.get(class) {
+                                v == value
+                            } else {
+                                values.insert(*class, *value);
+                                true
+                            }
+                        }) {
+                            Some(Ok(map))
+                        } else {
+                            None
+                        }
+                    }
+                };
                 match known_column {
-                    None => Box::new(table.rows().map(move |row| {
-                        classes
-                            .clone()
-                            .into_iter()
-                            .zip(row.iter().copied())
-                            .collect()
-                    })),
-                    Some((column, value)) => Box::new(
+                    None => Box::new(
                         table
-                            .rows_with_value_in_column(*value, column)
+                            .rows()
                             .map(move |row| {
-                                classes
+                                Ok(classes
                                     .clone()
                                     .into_iter()
                                     .zip(row.iter().copied())
-                                    .collect()
-                            }),
+                                    .collect())
+                            })
+                            .filter_map(filter_map),
+                    ),
+                    Some((column, value)) => Box::new(
+                        table
+                            .rows_with_value_in_column(value, column)
+                            .map(move |row| {
+                                Ok(classes
+                                    .clone()
+                                    .into_iter()
+                                    .zip(row.iter().copied())
+                                    .collect())
+                            })
+                            .filter_map(filter_map),
                     ),
                 }
             }
             Instruction::Expr { expr, class } => {
-                let value = expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs)?;
-                Box::new(std::iter::once(HashMap::from([(*class, value)])))
+                match expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs) {
+                    Err(e) => Box::new(std::iter::once(Err(e))),
+                    Ok(value) => match values.get(class) {
+                        Some(v) if *v != value => Box::new(std::iter::empty()),
+                        _ => Box::new(std::iter::once(Ok(HashMap::from([(*class, value)])))),
+                    },
+                }
             }
-        };
-        Ok(Box::new(iter.filter(move |map: &HashMap<usize, Value>| {
-            map.iter()
-                .all(|(class, value)| !matches!(values.get(class), Some(v) if *v != *value))
-        })))
+        }
     }
 }
 
