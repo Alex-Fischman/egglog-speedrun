@@ -127,8 +127,11 @@ impl Query {
             for ends in deps.values_mut() {
                 *ends = ends.difference(&bucket).copied().collect();
             }
-            // For each bucket, sort its elements (mostly for determinism)
+
             let mut bucket: Vec<_> = bucket.into_iter().collect();
+            // Sort for determinism
+            bucket.sort_unstable();
+            // Sort for efficiency
             bucket.sort_by_key(|i| std::cmp::Reverse(classes[i].exprs.len()));
 
             ordering.append(&mut bucket);
@@ -242,7 +245,6 @@ pub struct Bindings<'a> {
 }
 
 /// An instruction to generate one layer of the trie.
-#[derive(Clone)]
 enum Instruction {
     /// Iterate over all rows in a table
     Row {
