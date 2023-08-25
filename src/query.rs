@@ -190,7 +190,7 @@ impl Query {
             classes: &self.classes,
             funcs,
             instructions,
-            trie: vec![],
+            trie: Vec::new(),
         })
     }
 }
@@ -287,7 +287,8 @@ enum Instruction {
 }
 
 impl<'a> Bindings<'a> {
-    fn values_to_vars(&self, values: &HashMap<usize, Value>) -> HashMap<&str, Value> {
+    /// Convert the keys of a map from classes to names.
+    fn values_to_vars(&self, values: &HashMap<usize, Value>) -> HashMap<&'a str, Value> {
         values
             .iter()
             .filter_map(|(class, value)| {
@@ -298,25 +299,64 @@ impl<'a> Bindings<'a> {
             })
             .collect()
     }
+
+    /// Advance the lazy trie up to `height` to the next value.
+    fn advance(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
+        // Advance the specified iterator to the next value.
+        if self.trie[height].next().is_some() {
+            // If we have a value, then great! Build the values map and return it.
+            let mut values: HashMap<usize, Value> = HashMap::new();
+            for iter in &mut self.trie[..=height] {
+                for (&class, &value) in iter.peek().unwrap() {
+                    values.insert(class, value);
+                }
+            }
+            Ok(Some(values))
+        } else if height == 0 {
+            // If we don't have a value and we're at the bottom of the trie, we're done.
+            Ok(None)
+        } else if let Some(values) = self.advance(height - 1)? {
+            // If we don't have a value and we're not at the bottom of the trie, advance
+            // the previous height and then rebuild this height using the new `values` map.
+            self.trie[height] = self.instructions[height].as_iter(self, &values)?.peekable();
+            // Now try to advance the rebuilt layer.
+            self.advance(height)
+        } else {
+            // If the recursive call said that we're done, then we're done.
+            Ok(None)
+        }
+    }
+}
+
+impl Instruction {
+    fn as_iter(
+        &self,
+        bindings: &Bindings,
+        values: &HashMap<usize, Value>,
+    ) -> Result<Box<dyn Iterator<Item = HashMap<usize, Value>>>, String> {
+        Ok(match self {
+            Instruction::Expr { expr, class } => {
+                let value = expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs)?;
+                match values.get(class) {
+                    Some(v) if *v != value => Box::new(std::iter::empty()),
+                    _ => Box::new(std::iter::once(HashMap::from([(*class, value)]))),
+                }
+            }
+            _ => todo!(),
+        })
+    }
 }
 
 impl<'a> Iterator for Bindings<'a> {
     type Item = HashMap<&'a str, Value>;
     fn next(&mut self) -> Option<HashMap<&'a str, Value>> {
-        // Advance iterators starting at the leaf until we find one that has another element.
-        // If none of them can be advanced, we're done. Otherwise, we need to rebuild the trie
-        // from the instruction above the one that worked. There's a special case though; if the
-        // trie vec is empty, we're on the first iteration, and we need build the whole thing.
-        let _build_from = if self.trie.is_empty() {
-            0
-        } else if let Some(i) = self.trie.iter_mut().rposition(|iter| iter.next().is_some()) {
-            i + 1
+        if self.trie.is_empty() {
+            todo!("build the initial tree and return")
         } else {
-            return None;
-        };
-
-        // Build the missing layers of the trie.
-
-        todo!()
+            self.advance(self.instructions.len() - 1)
+                .unwrap()
+                .as_ref()
+                .map(|values| self.values_to_vars(values))
+        }
     }
 }
