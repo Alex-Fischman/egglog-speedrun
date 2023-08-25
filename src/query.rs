@@ -11,6 +11,8 @@ pub struct Query {
     rows: HashSet<(String, Vec<usize>)>,
     /// The ordering in which to resolve the `Expr`s in `classes`.
     ordering: Vec<usize>,
+    /// The dependency map used to generate `ordering`.
+    dependencies: HashMap<usize, HashSet<usize>>,
 }
 
 #[derive(Default)]
@@ -107,6 +109,7 @@ impl Query {
             }
             deps.insert(*key, set);
         }
+        let dependencies = deps.clone();
 
         // Use `deps` to put the keys into buckets, where
         // bucket `i` must be computed before bucket `i+1`.
@@ -141,6 +144,7 @@ impl Query {
             classes,
             rows,
             ordering,
+            dependencies,
         })
     }
 
