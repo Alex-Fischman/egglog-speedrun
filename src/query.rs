@@ -334,56 +334,47 @@ impl Instruction {
     ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
         match self {
             Instruction::Row { table, classes } => {
-                let known_column = classes
+                let known_columns: Vec<Option<(usize, Value)>> = classes
                     .iter()
                     .enumerate()
-                    .find_map(|(i, c)| values.get(c).map(|v| (i, *v)));
-                let table = &bindings.funcs[table];
+                    .map(|(i, c)| values.get(c).map(|v| (i, *v)))
+                    .collect();
                 let classes = classes.clone();
-                let filter_map = move |result: Result<HashMap<usize, Value>, String>| match result {
-                    Err(e) => Some(Err(e)),
-                    Ok(map) => {
-                        let mut values = values.clone();
-                        if map.iter().all(|(class, value)| {
-                            if let Some(v) = values.get(class) {
-                                v == value
-                            } else {
-                                values.insert(*class, *value);
-                                true
+                let rows: Box<dyn Iterator<Item = _>> =
+                    if let Some(&(col, val)) = known_columns.iter().find_map(Option::as_ref) {
+                        Box::new(bindings.funcs[table].rows_with_value_in_column(val, col))
+                    } else {
+                        Box::new(bindings.funcs[table].rows())
+                    };
+                Box::new(
+                    rows.map(move |row| {
+                        Ok(classes
+                            .clone()
+                            .into_iter()
+                            .zip(row.iter().copied())
+                            .collect())
+                    })
+                    .filter_map(
+                        move |result: Result<HashMap<usize, Value>, String>| match result {
+                            Err(e) => Some(Err(e)),
+                            Ok(map) => {
+                                let mut values = values.clone();
+                                if map.iter().all(|(class, value)| {
+                                    if let Some(v) = values.get(class) {
+                                        v == value
+                                    } else {
+                                        values.insert(*class, *value);
+                                        true
+                                    }
+                                }) {
+                                    Some(Ok(map))
+                                } else {
+                                    None
+                                }
                             }
-                        }) {
-                            Some(Ok(map))
-                        } else {
-                            None
-                        }
-                    }
-                };
-                match known_column {
-                    None => Box::new(
-                        table
-                            .rows()
-                            .map(move |row| {
-                                Ok(classes
-                                    .clone()
-                                    .into_iter()
-                                    .zip(row.iter().copied())
-                                    .collect())
-                            })
-                            .filter_map(filter_map),
+                        },
                     ),
-                    Some((column, value)) => Box::new(
-                        table
-                            .rows_with_value_in_column(value, column)
-                            .map(move |row| {
-                                Ok(classes
-                                    .clone()
-                                    .into_iter()
-                                    .zip(row.iter().copied())
-                                    .collect())
-                            })
-                            .filter_map(filter_map),
-                    ),
-                }
+                )
             }
             Instruction::Expr { expr, class } => {
                 match expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs) {
