@@ -3,7 +3,7 @@
 use crate::*;
 
 /// An `egglog` expression.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Expr {
     /// The unit value.
     Unit,
@@ -34,7 +34,7 @@ impl Display for Expr {
 }
 
 /// An `egglog` value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Value {
     /// The unit value.
     Unit,
@@ -87,7 +87,7 @@ impl Value {
         } {
             Ok(())
         } else {
-            Err(format!("expected {t}, found {self:?}"))
+            Err(format!("expected {t}, found {self}"))
         }
     }
 }
@@ -101,7 +101,7 @@ impl Expr {
     ) -> Result<Value, String> {
         let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
             Value::Int(i) => Ok(i),
-            v => Err(format!("expected {}, found {v:?}", Type::Int)),
+            v => Err(format!("expected {}, found {v}", Type::Int)),
         };
         let ints = |exprs: &[Expr]| exprs.iter().map(int).collect::<Result<Vec<_>, _>>();
         match self {

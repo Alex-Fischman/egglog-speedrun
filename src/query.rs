@@ -300,7 +300,7 @@ impl<'a> Bindings<'a> {
     fn build(&mut self, height: usize, values: HashMap<usize, Value>) {
         match height.cmp(&self.trie.len()) {
             // trie has been built
-            std::cmp::Ordering::Less => assert_eq!(None, self.trie[height].peek()),
+            std::cmp::Ordering::Less => assert!(self.trie[height].peek().is_none()),
             // trie is being built
             std::cmp::Ordering::Equal => self
                 .trie
