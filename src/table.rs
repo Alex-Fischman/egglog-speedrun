@@ -22,34 +22,6 @@ pub struct Table {
 type RowId = usize;
 
 impl Table {
-    fn inputs(&self) -> &[Type] {
-        &self.schema[..self.schema.len() - 1]
-    }
-
-    fn output(&self) -> &Type {
-        &self.schema[self.schema.len() - 1]
-    }
-
-    fn match_inputs(&self, inputs: &[Value]) -> Result<(), String> {
-        if inputs.len() == self.inputs().len() {
-            for (t, v) in self.inputs().iter().zip(inputs) {
-                v.assert_type(t)?;
-            }
-            Ok(())
-        } else {
-            Err(format!(
-                "expected {} inputs, found {} inputs for {}",
-                self.inputs().len(),
-                inputs.len(),
-                self.name,
-            ))
-        }
-    }
-
-    fn match_output(&self, output: Value) -> Result<(), String> {
-        output.assert_type(self.output())
-    }
-
     /// Create a new `Table` with the given schema.
     #[must_use]
     pub fn new(name: String, schema: Vec<Type>, merge: Option<Expr>) -> Table {
@@ -60,27 +32,6 @@ impl Table {
             merge,
             primary: Vec::new(),
             function: HashMap::new(),
-        }
-    }
-
-    /// Get the output of a row in the table given its inputs.
-    pub fn get(&self, xs: &[Value]) -> Result<Value, String> {
-        self.match_inputs(xs)?;
-        match self.function.get(xs) {
-            None => Err(format!(
-                "unknown output for ({} {})",
-                self.name,
-                xs.iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )),
-            Some(&id) => {
-                assert_eq!(xs, &self.primary[id].0[..self.schema.len() - 1]);
-                let output = self.primary[id].0[self.schema.len() - 1];
-                self.match_output(output)?;
-                Ok(output)
-            }
         }
     }
 
@@ -114,8 +65,21 @@ impl Table {
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the table was changed.
     pub fn insert(&mut self, xs: &[Value], y: Value) -> Result<bool, String> {
-        self.match_inputs(xs)?;
-        self.match_output(y)?;
+        let inputs = &self.schema[..self.schema.len() - 1];
+        let output = &self.schema[self.schema.len() - 1];
+        if xs.len() != inputs.len() {
+            return Err(format!(
+                "expected {} inputs, found {} inputs for {}",
+                inputs.len(),
+                xs.len(),
+                self.name,
+            ));
+        }
+        for (t, x) in inputs.iter().zip(xs) {
+            x.assert_type(t)?;
+        }
+        y.assert_type(output)?;
+
         match self.function.get(xs) {
             None => {
                 let mut row = xs.to_vec();
@@ -125,7 +89,7 @@ impl Table {
             }
             Some(&id) => {
                 let old = self.primary[id].0[self.schema.len() - 1];
-                let new = match (&self.merge, &self.output()) {
+                let new = match (&self.merge, &output) {
                     (Some(merge), _) => merge
                         .evaluate(&HashMap::from([("old", old), ("new", y)]), &HashMap::new())?,
                     (None, Type::Unit) => Value::Unit,
@@ -155,20 +119,23 @@ impl Table {
             .map(|(row, _)| row.as_slice())
     }
 
+    /// Get the (at most) one row in this table with the specific inputs in the input columns.
+    pub fn rows_with_inputs(&self, xs: &[Value]) -> impl Iterator<Item = &[Value]> {
+        self.function
+            .get(xs)
+            .into_iter()
+            .map(|&id| self.primary[id].0.as_slice())
+    }
+
     /// Get all of the rows that have a specific value in a specific column.
-    #[must_use]
-    pub fn rows_with_value_in_column<'a>(
-        &'a self,
+    pub fn rows_with_value_in_column(
+        &self,
         value: Value,
         column: usize,
-    ) -> Box<dyn Iterator<Item = &[Value]> + 'a> {
-        match self.columns[column].get(&value) {
-            Some(set) => Box::new(
-                set.iter()
-                    .map(|id| &self.primary[*id])
-                    .map(|(row, _)| row.as_slice()),
-            ),
-            None => Box::new(std::iter::empty()),
-        }
+    ) -> impl Iterator<Item = &[Value]> {
+        self.columns[column]
+            .get(&value)
+            .into_iter()
+            .flat_map(|set| set.iter().map(|&id| self.primary[id].0.as_slice()))
     }
 }

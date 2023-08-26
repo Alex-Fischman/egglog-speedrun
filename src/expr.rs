@@ -115,11 +115,17 @@ impl Expr {
                 ("+", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
                 _ => match funcs.get(f) {
-                    Some(func) => Ok(func.get(
-                        &xs.iter()
+                    Some(func) => {
+                        let xs: Vec<Value> = xs
+                            .iter()
                             .map(|x| x.evaluate(vars, funcs))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    )?),
+                            .collect::<Result<_, _>>()?;
+                        match func.rows_with_inputs(&xs).collect::<Vec<_>>().as_slice() {
+                            [row] => Ok(row[row.len() - 1]),
+                            [] => Err(format!("unknown value {self}")),
+                            _ => unreachable!("tables are functions, not relations"),
+                        }
+                    }
                     None => Err(format!("unknown function {self}")),
                 },
             },

@@ -334,18 +334,27 @@ impl Instruction {
     ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
         match self {
             Instruction::Row { table, classes } => {
-                let known_columns: Vec<Option<(usize, Value)>> = classes
+                let xs: Vec<Value> = classes[..classes.len() - 1]
+                    .iter()
+                    .filter_map(|c| values.get(c).copied())
+                    .collect();
+
+                let rows: Box<dyn Iterator<Item = _>> = if xs.len() + 1 == classes.len() {
+                    // We can use the function index.
+                    Box::new(bindings.funcs[table].rows_with_inputs(&xs))
+                } else if let Some((col, val)) = classes
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| values.get(c).map(|v| (i, *v)))
-                    .collect();
+                    .find_map(|(i, c)| values.get(c).map(|v| (i, *v)))
+                {
+                    // We can use a column index.
+                    Box::new(bindings.funcs[table].rows_with_value_in_column(val, col))
+                } else {
+                    // We don't know any columns so we have to enumerate the whole table.
+                    Box::new(bindings.funcs[table].rows())
+                };
+
                 let classes = classes.clone();
-                let rows: Box<dyn Iterator<Item = _>> =
-                    if let Some(&(col, val)) = known_columns.iter().find_map(Option::as_ref) {
-                        Box::new(bindings.funcs[table].rows_with_value_in_column(val, col))
-                    } else {
-                        Box::new(bindings.funcs[table].rows())
-                    };
                 Box::new(
                     rows.map(move |row| {
                         Ok(classes
