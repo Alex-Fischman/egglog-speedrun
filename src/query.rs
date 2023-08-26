@@ -4,15 +4,16 @@ use crate::*;
 
 /// A `Query` is an object that takes the tables in a database and returns
 /// all possible variable bindings that satisfy a multi-pattern.
-pub struct Query {
+pub struct Query<'a> {
+    /// The slice that generated this query.
+    slice: Slice<'a>,
     /// A list of `EqClasses`, each with a unique `usize` name.
     classes: HashMap<usize, EqClass>,
     /// A list of row constraints, where each class must come from the same row in the table.
     rows: HashSet<(String, Vec<usize>)>,
-    /// The ordering in which to resolve the `Expr`s in `classes`.
-    ordering: Vec<usize>,
-    /// The dependency map used to generate `ordering`.
-    dependencies: HashMap<usize, HashSet<usize>>,
+    /// The dependency map used to generate an ordering. The keys are (class, expr) pairs,
+    /// and the values are sets of class indices that need to be computed before the expr.
+    dependencies: HashMap<(usize, usize), HashSet<usize>>,
 }
 
 #[derive(Default)]
@@ -21,13 +22,13 @@ struct EqClass {
     exprs: Vec<Expr>,
 }
 
-impl Query {
+impl<'a> Query<'a> {
     /// Construct a new `Query` from a multi-pattern.
     pub fn new(
-        slice: &Slice,
+        slice: Slice<'a>,
         funcs: &HashSet<&String>,
         patterns: &[Pattern],
-    ) -> Result<Query, String> {
+    ) -> Result<Query<'a>, String> {
         // Equality constraints among different expressions.
         let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
             Ok(EqClass {
@@ -99,78 +100,68 @@ impl Query {
         // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
         let classes: HashMap<_, _> = eqs.into_iter().collect();
 
-        // Dependency constraints, where each key is a canonical key in `eqs`, and
-        // the value is the set of canonical keys that any of its `exprs` depend on.
-        let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
+        // Compute dependency constraints, which give an ordering for `Expr` computation.
+        let mut dependencies: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
         for (key, class) in &classes {
-            let mut set = HashSet::new();
-            for expr in &class.exprs {
+            for (i, expr) in class.exprs.iter().enumerate() {
+                let mut set = HashSet::new();
                 deps_from_expr(expr, &names_to_keys, &mut set);
+                assert!(dependencies.insert((*key, i), set).is_none());
             }
-            deps.insert(*key, set);
-        }
-        let dependencies = deps.clone();
-
-        // Use `deps` to put the keys into buckets, where
-        // bucket `i` must be computed before bucket `i+1`.
-        let mut ordering: Vec<usize> = Vec::new();
-        while !deps.is_empty() {
-            // Pull all keys with no dependencies out of `deps` and into `bucket`.
-            let bucket: HashSet<_> = deps
-                .iter()
-                .filter(|t| t.1.is_empty())
-                .map(|t| t.0)
-                .copied()
-                .collect();
-            if bucket.is_empty() {
-                return Err(format!("dependency cycle in {slice}"));
-            }
-            deps.retain(|k, _| !bucket.contains(k));
-            // The bucket "has been computed", so remove all of its elements from deps.
-            for ends in deps.values_mut() {
-                *ends = ends.difference(&bucket).copied().collect();
-            }
-
-            let mut bucket: Vec<_> = bucket.into_iter().collect();
-            // Sort for determinism
-            bucket.sort_unstable();
-            // Sort for efficiency
-            bucket.sort_by_key(|i| std::cmp::Reverse(classes[i].exprs.len()));
-
-            ordering.append(&mut bucket);
         }
 
         Ok(Query {
+            slice,
             classes,
             rows,
-            ordering,
             dependencies,
         })
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    pub fn run<'a>(&'a self, funcs: &'a HashMap<String, Table>) -> Result<Bindings<'a>, String> {
-        // Sort rows by table size
-        let mut rows: Vec<_> = self.rows.iter().collect();
-        rows.sort_by_key(|(table, _)| funcs[table].len());
-
-        // Compute instructions
-        // todo: interleave rows and ordering instructions more efficiently
+    pub fn run(&'a self, funcs: &'a HashMap<String, Table>) -> Result<Bindings<'a>, String> {
+        // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
-        // Compute instructions for rows
-        for (table, classes) in rows {
-            instructions.push(Instruction::Row {
-                table: table.clone(),
-                classes: classes.clone(),
-            });
-        }
-        // Compute instructions for ordering
-        for &class in &self.ordering {
-            for expr in &self.classes[&class].exprs {
-                instructions.push(Instruction::Expr {
-                    expr: expr.clone(),
-                    class,
-                });
+        // The classes that the current value of `instructions` computes.
+        let mut known: HashSet<usize> = HashSet::new();
+        // `Expr` indices that haven't been calculated yet.
+        let mut exprs: HashSet<(usize, usize)> = self.dependencies.keys().copied().collect();
+        // Row constraints that haven't been calculated yet.
+        let mut rows: Vec<_> = self.rows.iter().cloned().collect();
+        rows.sort_unstable(); // determinism
+        rows.sort_by_key(|(table, _)| std::cmp::Reverse(funcs[table].len())); // efficiency
+
+        while known.len() < self.classes.len() {
+            // Get all expr indices that have known dependencies.
+            let mut calculable_exprs: Vec<_> = exprs
+                .iter()
+                .copied()
+                .filter(|expr| self.dependencies[expr].is_subset(&known))
+                .collect();
+            for expr in &calculable_exprs {
+                assert!(exprs.remove(expr));
+            }
+            calculable_exprs.sort_unstable(); // determinism
+            calculable_exprs.sort_by_key(|(i, _)| !known.contains(i)); // efficiency
+
+            // Add `Expr` instructions.
+            known.extend(calculable_exprs.iter().map(|(class, _)| class));
+            instructions.extend(
+                calculable_exprs
+                    .iter()
+                    .map(|&(class, j)| Instruction::Expr {
+                        expr: self.classes[&class].exprs[j].clone(),
+                        class,
+                    }),
+            );
+
+            if let Some((table, classes)) = rows.pop() {
+                // Add a `Row` instruction.
+                known.extend(classes.iter());
+                instructions.push(Instruction::Row { table, classes });
+            } else if calculable_exprs.is_empty() && rows.is_empty() {
+                // If there aren't any rows and no exprs were added, there's a cycle.
+                return Err(format!("dependency cycle in {}", self.slice));
             }
         }
 

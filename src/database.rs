@@ -7,7 +7,7 @@ use crate::*;
 pub struct Database<'a> {
     sorts: Vec<String>,
     funcs: HashMap<String, Table>,
-    rules: Vec<(Query, Vec<Action<'a>>)>,
+    rules: Vec<(Query<'a>, Vec<Action<'a>>)>,
 }
 
 impl Display for Database<'_> {
@@ -55,7 +55,7 @@ impl<'a> Database<'a> {
     /// Add a rule to this `Database`.
     pub fn rule(
         &mut self,
-        query: Query,
+        query: Query<'a>,
         actions: Vec<Action<'a>>,
     ) -> Result<&mut Database<'a>, String> {
         self.rules.push((query, actions));
