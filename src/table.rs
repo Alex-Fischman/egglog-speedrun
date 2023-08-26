@@ -43,13 +43,13 @@ impl Table {
     }
 
     /// Adds a row to the table, without checking if the inputs are already present.
-    fn append_row(&mut self, row: &[Value]) {
+    fn append_row(&mut self, row: Vec<Value>) {
         let id = self.primary.len();
-        self.primary.push((row.to_vec(), true));
         self.function.insert(row[..row.len() - 1].to_vec(), id);
-        for (column, x) in self.columns.iter_mut().zip(row) {
-            column.entry(*x).or_default().insert(id);
+        for (column, &x) in self.columns.iter_mut().zip(&row) {
+            column.entry(x).or_default().insert(id);
         }
+        self.primary.push((row, true));
     }
 
     /// Removes a row from the table by marking it as dead.
@@ -64,51 +64,38 @@ impl Table {
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the table was changed.
-    pub fn insert(&mut self, xs: &[Value], y: Value) -> Result<bool, String> {
-        let inputs = &self.schema[..self.schema.len() - 1];
-        let output = &self.schema[self.schema.len() - 1];
-        if xs.len() != inputs.len() {
+    pub fn insert(&mut self, mut row: Vec<Value>) -> Result<bool, String> {
+        if row.len() != self.schema.len() {
             return Err(format!(
-                "expected {} inputs, found {} inputs for {}",
-                inputs.len(),
-                xs.len(),
+                "expected row of length {}, found row of length {} for {}",
+                self.schema.len(),
+                row.len(),
                 self.name,
             ));
         }
-        for (t, x) in inputs.iter().zip(xs) {
+        for (t, x) in self.schema.iter().zip(&row) {
             x.assert_type(t)?;
         }
-        y.assert_type(output)?;
 
-        match self.function.get(xs) {
-            None => {
-                let mut row = xs.to_vec();
-                row.push(y);
-                self.append_row(&row);
-                Ok(true)
+        if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
+            let old = &self.primary[id].0[self.schema.len() - 1];
+            let new = &mut row[self.schema.len() - 1];
+            *new = match &self.merge {
+                Some(expr) => expr.evaluate(
+                    &HashMap::from([("old", *old), ("new", *new)]),
+                    &HashMap::new(),
+                )?,
+                None if old == new => *new,
+                None => return Err(format!("{old} != {new} in {}", self.name)),
+            };
+            if old == new {
+                return Ok(false);
             }
-            Some(&id) => {
-                let old = self.primary[id].0[self.schema.len() - 1];
-                let new = match (&self.merge, &output) {
-                    (Some(merge), _) => merge
-                        .evaluate(&HashMap::from([("old", old), ("new", y)]), &HashMap::new())?,
-                    (None, Type::Unit) => Value::Unit,
-                    (None, Type::Int) => {
-                        return Err(format!("missing merge function for {}", self.name))
-                    }
-                    (None, Type::Sort(_)) => todo!("union-find get/make-set"),
-                };
-                if old == new {
-                    Ok(false)
-                } else {
-                    self.remove_row(id);
-                    let mut row = xs.to_vec();
-                    row.push(new);
-                    self.append_row(&row);
-                    Ok(true)
-                }
-            }
+            self.remove_row(id);
         }
+
+        self.append_row(row);
+        Ok(true)
     }
 
     /// Get all of the rows in this table.

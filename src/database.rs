@@ -113,15 +113,15 @@ fn run_action(
 ) -> Result<bool, String> {
     match action {
         Action::Insert(_, f, xs, y) => {
-            let xs = xs
+            let row = xs
                 .iter()
+                .chain([y])
                 .map(|x| x.evaluate(vars, funcs))
                 .collect::<Result<Vec<_>, _>>()?;
-            let y = y.evaluate(vars, funcs)?;
             let changed = funcs
                 .get_mut(f.as_str())
                 .ok_or(format!("unknown function {f}"))?
-                .insert(&xs, y)?;
+                .insert(row)?;
             Ok(changed)
         }
     }
