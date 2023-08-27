@@ -41,7 +41,7 @@ pub enum Value {
     /// An integer.
     Int(i64),
     /// An element of an uninterpreted sort.
-    Sort(u64),
+    Sort(usize),
 }
 
 impl Display for Value {
@@ -95,11 +95,43 @@ impl Value {
 pub type Vars<'a> = HashMap<&'a str, Value>;
 /// A map from function names to `Table`s.
 pub type Funcs = HashMap<String, Table>;
+/// A map from sort names to `UnionFind`s.
+pub type Sorts = HashMap<String, UnionFind<'static, ()>>;
 
 impl Expr {
-    /// Get a `Value` from an `Expr` under a given context.
-    pub fn evaluate(&self, vars: &Vars, funcs: &Funcs) -> Result<Value, String> {
-        let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
+    /// Get a `Value` from an `Expr` under a given context, allowing database modification.
+    pub fn evaluate_mut(
+        &self,
+        vars: &Vars,
+        funcs: &mut Funcs,
+        sorts: &mut Sorts,
+    ) -> Result<Value, String> {
+        self.evaluate_private(vars, &mut |f, xs| {
+            Ok(match funcs.get_mut(f) {
+                Some(func) => Some(func.get(xs, sorts)?),
+                None => None,
+            })
+        })
+    }
+
+    /// Get a `Value` from an `Expr` under a given context, without modifying the database.
+    pub fn evaluate_ref(&self, vars: &Vars, funcs: &Funcs) -> Result<Value, String> {
+        self.evaluate_private(vars, &mut |f, xs| {
+            Ok(funcs.get(f).map(|func| {
+                func.rows_with_inputs(&xs)
+                    .next()
+                    .map(|row| row[row.len() - 1])
+            }))
+        })
+    }
+
+    /// A combined backend for both versions of evaluate, to avoid implementing it twice.
+    fn evaluate_private(
+        &self,
+        vars: &Vars,
+        funcs: &mut impl FnMut(&str, Vec<Value>) -> Result<Option<Option<Value>>, String>,
+    ) -> Result<Value, String> {
+        let int = |expr: &Expr| match expr.evaluate_private(vars, funcs)? {
             Value::Int(i) => Ok(i),
             v => Err(format!("expected {}, found {v}", Type::Int)),
         };
@@ -114,20 +146,15 @@ impl Expr {
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
                 ("+", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
                 ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
-                _ => match funcs.get(f) {
-                    Some(func) => {
-                        let xs: Vec<Value> = xs
-                            .iter()
-                            .map(|x| x.evaluate(vars, funcs))
-                            .collect::<Result<_, _>>()?;
-                        match func.rows_with_inputs(&xs).collect::<Vec<_>>().as_slice() {
-                            [row] => Ok(row[row.len() - 1]),
-                            [] => Err(format!("unknown value {self}")),
-                            _ => unreachable!("tables are functions, not relations"),
-                        }
-                    }
-                    None => Err(format!("unknown function {self}")),
-                },
+                _ => {
+                    let xs: Vec<Value> = xs
+                        .iter()
+                        .map(|x| x.evaluate_private(vars, funcs))
+                        .collect::<Result<_, _>>()?;
+                    funcs(f, xs)?
+                        .ok_or(format!("unknown function {self}"))?
+                        .ok_or(format!("unknown value {self}"))
+                }
             },
         }
     }
