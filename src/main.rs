@@ -18,6 +18,7 @@ pub mod unionfind;
 pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::*};
 pub use std::collections::{HashMap, HashSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
+pub use std::iter::{empty, once};
 
 fn main() {
     match run() {

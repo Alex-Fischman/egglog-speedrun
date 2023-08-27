@@ -123,11 +123,13 @@ impl Expr {
                 Some(func) => Some(func.get(xs, sorts)?),
                 None => None,
             })
-        })
+        })?
+        .ok_or(format!("unknown value {self}"))
     }
 
     /// Get a `Value` from an `Expr` under a given context, without modifying the database.
-    pub fn evaluate_ref(&self, vars: &Vars, funcs: &Funcs) -> Result<Value, String> {
+    /// Returns `None` instead of `Err` iff the only error is a lookup failure inside a table.
+    pub fn evaluate_ref(&self, vars: &Vars, funcs: &Funcs) -> Result<Option<Value>, String> {
         self.evaluate_private(vars, &mut |f, xs| {
             Ok(funcs.get(f).map(|func| {
                 func.rows_with_inputs(&xs)
@@ -142,30 +144,40 @@ impl Expr {
         &self,
         vars: &Vars,
         funcs: &mut impl FnMut(&str, Vec<Value>) -> Result<Option<Option<Value>>, String>,
-    ) -> Result<Value, String> {
+    ) -> Result<Option<Value>, String> {
         let int = |expr: &Expr| match expr.evaluate_private(vars, funcs)? {
-            Value::Int(i) => Ok(i),
-            v => Err(format!("expected {}, found {v}", Type::Int)),
+            Some(Value::Int(i)) => Ok(Some(i)),
+            None => Ok(None),
+            Some(v) => Err(format!("expected {}, found {v}", Type::Int)),
         };
         let ints = |exprs: &[Expr]| exprs.iter().map(int).collect::<Result<Vec<_>, _>>();
         match self {
-            Expr::Unit => Ok(Value::Unit),
-            Expr::Int(i) => Ok(Value::Int(*i)),
+            Expr::Unit => Ok(Some(Value::Unit)),
+            Expr::Int(i) => Ok(Some(Value::Int(*i))),
             Expr::Var(s) => match vars.get(s.as_str()) {
-                Some(v) => Ok(*v),
+                Some(v) => Ok(Some(*v)),
                 None => Err(format!("unknown variable {self}")),
             },
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
-                ("+", _) => Ok(Value::Int(ints(xs)?.into_iter().sum())),
-                ("min", [_, ..]) => Ok(Value::Int(ints(xs)?.into_iter().min().unwrap())),
+                ("+", _) => match ints(xs)?.into_iter().try_fold(0, |a, b| Some(a + b?)) {
+                    Some(i) => Ok(Some(Value::Int(i))),
+                    None => Ok(None),
+                },
+                ("min", [_, ..]) => {
+                    match ints(xs)?.into_iter().reduce(|a, b| Some(a? + b?)).unwrap() {
+                        Some(i) => Ok(Some(Value::Int(i))),
+                        None => Ok(None),
+                    }
+                }
                 _ => {
-                    let xs: Vec<Value> = xs
+                    let xs: Option<Vec<Value>> = xs
                         .iter()
                         .map(|x| x.evaluate_private(vars, funcs))
                         .collect::<Result<_, _>>()?;
-                    funcs(f, xs)?
-                        .ok_or(format!("unknown function {self}"))?
-                        .ok_or(format!("unknown value {self}"))
+                    match xs {
+                        Some(xs) => funcs(f, xs)?.ok_or(format!("unknown function {self}")),
+                        None => Ok(None),
+                    }
                 }
             },
         }

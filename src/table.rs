@@ -74,7 +74,7 @@ impl Table {
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the table was changed.
-    pub fn insert(&mut self, mut row: Vec<Value>) -> Result<bool, String> {
+    pub fn insert(&mut self, mut row: Vec<Value>, sorts: &mut Sorts) -> Result<bool, String> {
         if row.len() != self.schema.len() {
             return Err(format!(
                 "expected row of length {}, found row of length {} for {}",
@@ -91,9 +91,10 @@ impl Table {
             let old = &self.primary[id].0[self.schema.len() - 1];
             let new = &mut row[self.schema.len() - 1];
             *new = match &self.merge {
-                Some(expr) => expr.evaluate_ref(
+                Some(expr) => expr.evaluate_mut(
                     &HashMap::from([("old", *old), ("new", *new)]),
-                    &HashMap::new(),
+                    &mut HashMap::new(),
+                    sorts,
                 )?,
                 None if old == new => *new,
                 None => return Err(format!("{old} != {new} in {}", self.name)),
@@ -116,7 +117,7 @@ impl Table {
         } else if let Type::Sort(sort) = &self.schema[self.schema.len() - 1] {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
             xs.push(y);
-            self.insert(xs)?;
+            self.insert(xs, sorts)?;
             Some(y)
         } else {
             None

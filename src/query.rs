@@ -361,21 +361,19 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // trie is being built
             std::cmp::Ordering::Equal => self
                 .trie
-                .push((Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>).peekable()),
+                .push((Box::new(empty()) as Box<dyn Iterator<Item = _>>).peekable()),
             // this should never happen
             std::cmp::Ordering::Greater => panic!(),
         }
 
         self.trie[height] = match &self.instructions[height] {
             Instruction::Expr { expr, class } => {
-                match expr.evaluate_ref(&self.values_to_vars(&values), self.funcs) {
-                    Err(e) => Box::new(std::iter::once(Err(e))),
-                    Ok(value) => match values.get(class) {
-                        Some(v) if *v != value => {
-                            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
-                        }
-                        _ => Box::new(std::iter::once(Ok(HashMap::from([(*class, value)])))),
-                    },
+                let x = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
+                match (x, values.get(class)) {
+                    (Err(e), _) => Box::new(once(Err(e))) as Box<dyn Iterator<Item = _>>,
+                    (Ok(None), _) => Box::new(empty()),
+                    (Ok(Some(value)), Some(v)) if *v != value => Box::new(empty()),
+                    (Ok(Some(value)), _) => Box::new(once(Ok(HashMap::from([(*class, value)])))),
                 }
             }
             Instruction::Row { table, classes } => {

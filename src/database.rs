@@ -121,7 +121,7 @@ fn run_action(
             let changed = funcs
                 .get_mut(f.as_str())
                 .ok_or(format!("unknown function {f}"))?
-                .insert(row)?;
+                .insert(row, sorts)?;
             Ok(changed)
         }
         Action::Union(x, y) => {
