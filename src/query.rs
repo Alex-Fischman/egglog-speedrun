@@ -25,9 +25,9 @@ struct EqClass {
     exprs: Vec<Expr>,
 }
 
-impl<'a> Query<'a> {
+impl Query<'_> {
     /// Construct a new `Query` from a multi-pattern.
-    pub fn new(
+    pub fn new<'a>(
         slice: Slice<'a>,
         funcs: &HashSet<&String>,
         patterns: &[Pattern],
@@ -122,7 +122,7 @@ impl<'a> Query<'a> {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    pub fn run(&'a self, funcs: &'a Funcs) -> Result<Bindings<'a>, String> {
+    pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
         // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
         // The classes that the current value of `instructions` computes.
@@ -229,15 +229,15 @@ fn deps_from_expr(
 }
 
 /// An iterator over all possible variable assignments that match a `Query`.
-pub struct Bindings<'a> {
+pub struct Bindings<'a, 'b> {
     /// See `Query`.
     classes: &'a Classes,
     /// The current state of the `Table`s in the `Database`.
-    funcs: &'a Funcs,
+    funcs: &'b Funcs,
     /// The `Instruction`s to generate each layer in the trie.
     instructions: Vec<Instruction>,
     /// A lazy trie over the bindings.
-    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'a>>>,
+    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
 }
 
 /// An instruction to generate one layer of the trie.
@@ -258,7 +258,7 @@ enum Instruction {
     },
 }
 
-impl<'a> Bindings<'a> {
+impl<'a, 'b> Bindings<'a, 'b> {
     /// Convert the keys of a map from classes to names.
     fn values_to_vars(&self, values: &Values) -> Vars<'a> {
         values
@@ -391,7 +391,7 @@ impl<'a> Bindings<'a> {
     }
 }
 
-impl<'a> Iterator for Bindings<'a> {
+impl<'a, 'b> Iterator for Bindings<'a, 'b> {
     type Item = Result<Vars<'a>, String>;
     fn next(&mut self) -> Option<Result<Vars<'a>, String>> {
         // fun with nesting

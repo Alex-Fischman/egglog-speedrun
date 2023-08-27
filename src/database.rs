@@ -82,11 +82,10 @@ impl<'a> Database<'a> {
         let mut changed = true;
         while changed {
             changed = false;
-            let pre = self.funcs.clone();
-            for (query, actions) in &mut self.rules {
-                for vars in query.run(&pre)? {
-                    let vars = vars?;
-                    for action in &mut *actions {
+            for (query, actions) in &self.rules {
+                let bindings: Vec<Vars> = query.run(&self.funcs)?.collect::<Result<_, _>>()?;
+                for vars in bindings {
+                    for action in actions {
                         if run_action(action, &vars, &mut self.funcs)? {
                             changed = true;
                         }
