@@ -80,7 +80,7 @@ impl Table {
             let old = &self.primary[id].0[self.schema.len() - 1];
             let new = &mut row[self.schema.len() - 1];
             *new = match &self.merge {
-                Some(expr) => expr.evaluate(
+                Some(expr) => expr.evaluate_ref(
                     &HashMap::from([("old", *old), ("new", *new)]),
                     &HashMap::new(),
                 )?,
@@ -97,6 +97,21 @@ impl Table {
         Ok(true)
     }
 
+    /// Get the output value of a row for some inputs. If there isn't a value, but the
+    /// output type is a sort, create a new sort element, add it to the table, and return it.
+    pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
+        Ok(if let Some(&id) = self.function.get(&xs) {
+            Some(self.primary[id].0[self.schema.len() - 1])
+        } else if let Type::Sort(sort) = &self.schema[self.schema.len() - 1] {
+            let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
+            xs.push(y);
+            self.insert(xs)?;
+            Some(y)
+        } else {
+            None
+        })
+    }
+
     /// Get all of the rows in this table.
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
         self.primary
@@ -106,6 +121,7 @@ impl Table {
     }
 
     /// Get the (at most) one row in this table with the specific inputs in the input columns.
+    /// This method never changes `self`; notably, it will not create new sort elements.
     pub fn rows_with_inputs(&self, xs: &[Value]) -> impl Iterator<Item = &[Value]> {
         self.function
             .get(xs)
