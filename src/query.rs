@@ -9,11 +9,12 @@ pub struct Query<'a> {
     slice: Slice<'a>,
     /// A list of `EqClasses`, each with a unique `usize` name.
     classes: HashMap<usize, EqClass>,
-    /// A list of row constraints, where each class must come from the same row in the table.
-    rows: HashSet<(String, Vec<usize>)>,
-    /// The dependency map used to generate an ordering. The keys are (class, expr) pairs,
+    /// A dependency map used to generate an ordering. The keys are (class, expr) pairs,
     /// and the values are sets of class indices that need to be computed before the expr.
-    dependencies: HashMap<(usize, usize), HashSet<usize>>,
+    expr_deps: HashMap<(usize, usize), HashSet<usize>>,
+    /// A dependency map used to generate an ordering. The keys are (class, call) pairs,
+    /// and the values are sets of class indices that should be computed before the call.
+    call_deps: HashMap<(usize, usize), HashSet<usize>>,
 }
 
 #[derive(Default)]
@@ -52,15 +53,12 @@ impl Query<'_> {
             })
         });
 
-        let mut rows = Vec::new();
-
         // Add equality constraints from each pattern individually.
         for mut pattern in patterns {
             assert!(!pattern.0.is_empty());
-
-            let a = eqs_from_expr(pattern.0.remove(0), funcs, &mut eqs, &mut rows)?;
+            let a = eqs_from_expr(pattern.0.remove(0), funcs, &mut eqs)?;
             for expr in pattern.0 {
-                let b = eqs_from_expr(expr, funcs, &mut eqs, &mut rows)?;
+                let b = eqs_from_expr(expr, funcs, &mut eqs)?;
                 eqs.union(a, b)?;
             }
         }
@@ -81,22 +79,7 @@ impl Query<'_> {
             eqs.union(a, b)?;
         }
 
-        // Do congruence closure; if functions have the same inputs, they have the same output.
-        for (i, (f, f_cols)) in rows.iter().enumerate() {
-            for (g, g_cols) in &rows[i + 1..] {
-                let f_y = f_cols.len() - 1;
-                let g_y = g_cols.len() - 1;
-                if f == g && f_cols[..f_y] == g_cols[..g_y] {
-                    eqs.union(f_cols[f_y], g_cols[g_y])?;
-                }
-            }
-        }
-
         // Change keys to canonical keys.
-        let rows: HashSet<(String, Vec<_>)> = rows
-            .into_iter()
-            .map(|(f, v)| (f, v.into_iter().map(|key| eqs.find(key)).collect()))
-            .collect();
         let names_to_keys: HashMap<String, usize> = names_to_keys
             .into_iter()
             .map(|(k, v)| (k, eqs.find(v[0])))
@@ -105,113 +88,111 @@ impl Query<'_> {
         // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
         let classes: HashMap<usize, EqClass> = eqs.into_iter().collect();
 
-        // Compute dependency constraints, which give an ordering for `Expr` computation.
-        let mut dependencies: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
+        // Compute dependency constraints which give an ordering for `Expr` computation.
+        let mut expr_deps: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
         for (key, class) in &classes {
             for (i, expr) in class.exprs.iter().enumerate() {
                 let mut set = HashSet::new();
                 deps_from_expr(expr, &names_to_keys, &mut set);
-                assert!(dependencies.insert((*key, i), set).is_none());
+                assert!(expr_deps.insert((*key, i), set).is_none());
+            }
+        }
+
+        // Compute dependency constraints which give an ordering for call computation.
+        let mut call_deps: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
+        for (key, class) in &classes {
+            for (i, call) in class.calls.iter().enumerate() {
+                let set: HashSet<usize> = call.1.iter().copied().collect();
+                assert!(call_deps.insert((*key, i), set).is_none());
             }
         }
 
         Ok(Query {
             slice,
             classes,
-            rows,
-            dependencies,
+            expr_deps,
+            call_deps,
         })
     }
 
     /// Run this `Query` on the tables in the `Database`.
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
-        let names: HashMap<usize, &str> = self
-            .classes
-            .iter()
-            .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
-            .collect();
-
         // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
         // The classes that the current value of `instructions` computes.
         let mut known: HashSet<usize> = HashSet::new();
         // `Expr` indices that haven't been calculated yet.
-        let mut exprs: HashSet<(usize, usize)> = self.dependencies.keys().copied().collect();
+        let mut exprs: HashSet<(usize, usize)> = self.expr_deps.keys().copied().collect();
         // Call indices that haven't been calculated yet.
-        let mut calls: HashSet<(usize, usize)> = self
-            .classes
-            .iter()
-            .flat_map(|(k, v)| (0..v.calls.len()).map(|i| (*k, i)))
-            .collect();
-        // Row constraints that haven't been calculated yet.
-        let mut rows: Vec<_> = self.rows.iter().cloned().collect();
-        rows.sort_unstable(); // determinism
-        rows.sort_by_key(|(table, _)| std::cmp::Reverse(funcs[table].len())); // efficiency
+        let mut calls: HashSet<(usize, usize)> = self.call_deps.keys().copied().collect();
 
         while known.len() < self.classes.len() {
-            // Get all expr indices that have known dependencies.
+            // Get all indices that have known dependencies.
             let mut calculable_exprs: Vec<_> = exprs
                 .iter()
                 .copied()
-                .filter(|expr| self.dependencies[expr].is_subset(&known))
+                .filter(|expr| self.expr_deps[expr].is_subset(&known))
                 .collect();
-            for expr in &calculable_exprs {
-                assert!(exprs.remove(expr));
-            }
-            calculable_exprs.sort_unstable(); // determinism
-            calculable_exprs.sort_by_key(|(i, _)| !known.contains(i)); // efficiency
-
-            // Add `Expr` instructions.
-            known.extend(calculable_exprs.iter().map(|(class, _)| class));
-            instructions.extend(
-                calculable_exprs
-                    .iter()
-                    .map(|&(class, j)| Instruction::Expr {
-                        expr: &self.classes[&class].exprs[j],
-                        class,
-                    }),
-            );
-
-            // Do the same for calls.
             let mut calculable_calls: Vec<_> = calls
                 .iter()
                 .copied()
-                .filter(|(class, call)| {
-                    self.classes[class].calls[*call]
-                        .1
-                        .iter()
-                        .copied()
-                        .collect::<HashSet<_>>()
-                        .is_subset(&known)
-                })
+                .filter(|call| self.call_deps[call].is_subset(&known))
                 .collect();
-            for call in &calculable_calls {
-                assert!(calls.remove(call));
-            }
-            calculable_calls.sort_unstable(); // determinism
-            calculable_calls.sort_by_key(|(i, _)| !known.contains(i)); // efficiency
 
-            known.extend(calculable_calls.iter().map(|(class, _)| class));
-            instructions.extend(calculable_calls.iter().map(|&(class, j)| {
-                let (table, mut classes) = self.classes[&class].calls[j].clone();
-                classes.push(class);
-                Instruction::Row { table, classes }
-            }));
-
+            // We should do some work every iteration.
             if calculable_exprs.is_empty() && calculable_calls.is_empty() {
-                if let Some((table, classes)) = rows.pop() {
-                    // Add a `Row` instruction.
-                    known.extend(classes.iter());
-                    instructions.push(Instruction::Row { table, classes });
+                // We can still evaluate calls without all of their arguments using enumeration.
+                if let Some(&call) = calls.iter().max_by_key(|&(i, j)| {
+                    let (f, xs) = &self.classes[i].calls[*j];
+                    (
+                        std::cmp::Reverse(xs.iter().filter(|c| known.contains(c)).count()),
+                        funcs[f].len(),
+                    )
+                }) {
+                    calculable_calls.push(call);
                 } else {
-                    // If there aren't any rows and nothing was calculable, there's a cycle.
+                    // If nothing was calculable, there's a cycle.
                     return Err(format!("dependency cycle in {}", self.slice));
                 }
             }
+
+            // We're going to calculate these now, so take them off of the list.
+            for expr in &calculable_exprs {
+                assert!(exprs.remove(expr));
+            }
+            for call in &calculable_calls {
+                assert!(calls.remove(call));
+            }
+
+            // Once we add these instructions these classes will all be known.
+            known.extend(calculable_exprs.iter().map(|(i, _)| i));
+            for &(i, j) in &calculable_calls {
+                known.insert(i);
+                known.extend(&self.call_deps[&(i, j)]);
+            }
+
+            // Determinism
+            calculable_exprs.sort_unstable();
+            calculable_calls.sort_unstable();
+
+            // Add instructions.
+            instructions.extend(calculable_exprs.iter().map(|&(i, j)| Instruction::Expr {
+                expr: &self.classes[&i].exprs[j],
+                class: i,
+            }));
+            instructions.extend(calculable_calls.iter().map(|&(i, j)| {
+                let (table, mut classes) = self.classes[&i].calls[j].clone();
+                classes.push(i);
+                Instruction::Row { table, classes }
+            }));
         }
 
         Ok(Bindings {
-            names,
+            names: self
+                .classes
+                .iter()
+                .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
+                .collect(),
             funcs,
             instructions,
             trie: Vec::new(),
@@ -226,8 +207,6 @@ fn eqs_from_expr(
     funcs: &HashSet<&String>,
     // A `UnionFind` to combine the `EqClass`es.
     eqs: &mut UnionFind<EqClass>,
-    // A list of `eqs` keys that are all in the same row.
-    rows: &mut Vec<(String, Vec<usize>)>,
 ) -> Result<usize, String> {
     Ok(match expr {
         Expr::Var(var) => eqs.new_key(EqClass {
@@ -235,18 +214,14 @@ fn eqs_from_expr(
             ..EqClass::default()
         }),
         Expr::Call(f, xs) if funcs.contains(&f) => {
-            let mut row = Vec::new();
-            for x in xs {
-                let x = eqs_from_expr(x, funcs, eqs, rows)?;
-                row.push(x);
-            }
-            let y = eqs.new_key(EqClass {
-                calls: vec![(f.clone(), row.clone())],
+            let xs = xs
+                .into_iter()
+                .map(|x| eqs_from_expr(x, funcs, eqs))
+                .collect::<Result<Vec<_>, _>>()?;
+            eqs.new_key(EqClass {
+                calls: vec![(f, xs)],
                 ..EqClass::default()
-            });
-            row.push(y);
-            rows.push((f, row));
-            y
+            })
         }
         _ => eqs.new_key(EqClass {
             exprs: vec![expr],
