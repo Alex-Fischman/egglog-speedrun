@@ -35,10 +35,21 @@ impl Table {
     }
 
     /// Get the number of live rows in the table.
-    #[allow(clippy::len_without_is_empty)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.function.len()
+    }
+
+    /// Check if this table is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.function.is_empty()
+    }
+
+    /// Get the schema for this table.
+    #[must_use]
+    pub fn schema(&self) -> &[Type] {
+        &self.schema
     }
 
     /// Adds a row to the table, without checking if the inputs are already present.

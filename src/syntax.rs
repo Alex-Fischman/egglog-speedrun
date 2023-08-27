@@ -76,6 +76,8 @@ impl Display for Pattern {
 pub enum Action<'a> {
     /// Add a row to table `f`, merging if necessary.
     Insert(Slice<'a>, String, Vec<Expr>, Expr),
+    /// Union two elements of a sort together.
+    Union(Expr, Expr),
 }
 
 impl Display for Action<'_> {
@@ -89,6 +91,7 @@ impl Display for Action<'_> {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
+            Action::Union(x, y) => write!(f, "(union {x} {y})"),
         }
     }
 }
@@ -239,6 +242,10 @@ impl<'a> Sexp<'a> {
                             _ => Err(format!("expected `set` action, found {slice}")),
                         },
                         _ => Err(format!("expected `set` action, found {slice}")),
+                    },
+                    "union" => match list.as_slice() {
+                        [_, x, y] => Ok(Action::Union(x.to_expr()?, y.to_expr()?)),
+                        _ => Err(format!("expected `union` action, found {slice}")),
                     },
                     f => match list[1..]
                         .iter()

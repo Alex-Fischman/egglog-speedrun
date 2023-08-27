@@ -62,34 +62,37 @@ impl<'a, V> UnionFind<'a, V> {
     }
 
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
-    pub fn union(&mut self, a: usize, b: usize) -> Result<(), String> {
+    /// Returns whether the `UnionFind` was changed or not.
+    pub fn union(&mut self, a: usize, b: usize) -> Result<bool, String> {
         let a = self.find(a);
         let b = self.find(b);
-        if a != b {
-            // We want to move x and y into self.merge, so we swap them with a default value.
-            // This is okay since we're about to replace them. (Luckily we have a default!)
-            let x = std::mem::replace(&mut self.trees[a], Node::Child(0));
-            let y = std::mem::replace(&mut self.trees[b], Node::Child(0));
-            let (z, p, q) = match (x, y) {
-                (Node::Root(x, p), Node::Root(y, q)) => ((self.merge)(x, y)?, p, q),
-                _ => unreachable!(), // a and b are both roots!
-            };
-            match p.cmp(&q) {
-                std::cmp::Ordering::Less => {
-                    self.trees[a] = Node::Child(b);
-                    self.trees[b] = Node::Root(z, q);
-                }
-                std::cmp::Ordering::Greater => {
-                    self.trees[a] = Node::Root(z, p);
-                    self.trees[b] = Node::Child(a);
-                }
-                std::cmp::Ordering::Equal => {
-                    self.trees[a] = Node::Root(z, p + 1);
-                    self.trees[b] = Node::Child(a);
-                }
+        if a == b {
+            return Ok(false);
+        }
+
+        // We want to move x and y into self.merge, so we swap them with a default value.
+        // This is okay since we're about to replace them. (Luckily we have a default!)
+        let x = std::mem::replace(&mut self.trees[a], Node::Child(0));
+        let y = std::mem::replace(&mut self.trees[b], Node::Child(0));
+        let (z, p, q) = match (x, y) {
+            (Node::Root(x, p), Node::Root(y, q)) => ((self.merge)(x, y)?, p, q),
+            _ => unreachable!(), // a and b are both roots!
+        };
+        match p.cmp(&q) {
+            std::cmp::Ordering::Less => {
+                self.trees[a] = Node::Child(b);
+                self.trees[b] = Node::Root(z, q);
+            }
+            std::cmp::Ordering::Greater => {
+                self.trees[a] = Node::Root(z, p);
+                self.trees[b] = Node::Child(a);
+            }
+            std::cmp::Ordering::Equal => {
+                self.trees[a] = Node::Root(z, p + 1);
+                self.trees[b] = Node::Child(a);
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Merge a new value into an existing set without creating a new key.

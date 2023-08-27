@@ -55,6 +55,7 @@ impl Display for Value {
 }
 
 /// An `egglog` type.
+#[derive(Clone)]
 pub enum Type {
     /// The unit type.
     Unit,
@@ -74,10 +75,22 @@ impl Display for Type {
     }
 }
 
+impl Expr {
+    /// Gets the type of this expression.
+    pub fn get_type(&self, funcs: &Funcs) -> Result<Type, String> {
+        match self {
+            Expr::Unit => Ok(Type::Unit),
+            Expr::Int(_) => Ok(Type::Int),
+            Expr::Var(_) => Err(format!("unknown type for {self}")),
+            Expr::Call(f, _) => Ok(funcs[f].schema().last().unwrap().clone()),
+        }
+    }
+}
+
 impl Value {
     /// Asserts that this `Value` has the given `Type`.
     pub fn assert_type(&self, t: &Type) -> Result<(), String> {
-        // we could do all this by matching on a tuple, but we
+        // we could do this by matching on a tuple, but we
         // wouldn't get type errors when adding new `Value` variants
         if match self {
             Value::Unit => matches!(t, Type::Unit),
