@@ -55,7 +55,6 @@ impl Display for Value {
 }
 
 /// An `egglog` type.
-#[derive(Clone)]
 pub enum Type {
     /// The unit type.
     Unit,

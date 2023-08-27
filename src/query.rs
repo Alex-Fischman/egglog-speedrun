@@ -8,16 +8,13 @@ pub struct Query<'a> {
     /// The slice that generated this query.
     slice: Slice<'a>,
     /// A list of `EqClasses`, each with a unique `usize` name.
-    classes: Classes,
+    classes: HashMap<usize, EqClass>,
     /// A list of row constraints, where each class must come from the same row in the table.
     rows: HashSet<(String, Vec<usize>)>,
     /// The dependency map used to generate an ordering. The keys are (class, expr) pairs,
     /// and the values are sets of class indices that need to be computed before the expr.
     dependencies: HashMap<(usize, usize), HashSet<usize>>,
 }
-
-type Classes = HashMap<usize, EqClass>;
-type Values = HashMap<usize, Value>;
 
 #[derive(Default)]
 struct EqClass {
@@ -30,7 +27,7 @@ impl Query<'_> {
     pub fn new<'a>(
         slice: Slice<'a>,
         funcs: &HashSet<&String>,
-        patterns: &[Pattern],
+        patterns: Vec<Pattern>,
     ) -> Result<Query<'a>, String> {
         // Equality constraints among different expressions.
         let mut eqs: UnionFind<EqClass> = UnionFind::new(|mut a: EqClass, mut b| {
@@ -53,11 +50,11 @@ impl Query<'_> {
         let mut rows = Vec::new();
 
         // Add equality constraints from each pattern individually.
-        for pattern in patterns {
+        for mut pattern in patterns {
             assert!(!pattern.0.is_empty());
 
-            let a = eqs_from_expr(&pattern.0[0], funcs, &mut eqs, &mut rows)?;
-            for expr in &pattern.0[1..] {
+            let a = eqs_from_expr(pattern.0.remove(0), funcs, &mut eqs, &mut rows)?;
+            for expr in pattern.0 {
                 let b = eqs_from_expr(expr, funcs, &mut eqs, &mut rows)?;
                 eqs.union(a, b)?;
             }
@@ -101,7 +98,7 @@ impl Query<'_> {
             .collect();
 
         // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
-        let classes: Classes = eqs.into_iter().collect();
+        let classes: HashMap<usize, EqClass> = eqs.into_iter().collect();
 
         // Compute dependency constraints, which give an ordering for `Expr` computation.
         let mut dependencies: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
@@ -123,6 +120,12 @@ impl Query<'_> {
 
     /// Run this `Query` on the tables in the `Database`.
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
+        let names: HashMap<usize, &str> = self
+            .classes
+            .iter()
+            .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
+            .collect();
+
         // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
         // The classes that the current value of `instructions` computes.
@@ -169,7 +172,7 @@ impl Query<'_> {
         }
 
         Ok(Bindings {
-            classes: &self.classes,
+            names,
             funcs,
             instructions,
             trie: Vec::new(),
@@ -179,7 +182,7 @@ impl Query<'_> {
 
 fn eqs_from_expr(
     // The expression to transform into an `EqClass`.
-    expr: &Expr,
+    expr: Expr,
     // The set of functions that exist.
     funcs: &HashSet<&String>,
     // A `UnionFind` to combine the `EqClass`es.
@@ -192,7 +195,7 @@ fn eqs_from_expr(
             name: Some(var.clone()),
             ..EqClass::default()
         }),
-        Expr::Call(f, xs) if funcs.contains(f) => {
+        Expr::Call(f, xs) if funcs.contains(&f) => {
             let mut row = Vec::new();
             for x in xs {
                 let x = eqs_from_expr(x, funcs, eqs, rows)?;
@@ -205,7 +208,7 @@ fn eqs_from_expr(
             y
         }
         _ => eqs.new_key(EqClass {
-            exprs: vec![expr.clone()],
+            exprs: vec![expr],
             ..EqClass::default()
         }),
     })
@@ -231,7 +234,7 @@ fn deps_from_expr(
 /// An iterator over all possible variable assignments that match a `Query`.
 pub struct Bindings<'a, 'b> {
     /// See `Query`.
-    classes: &'a Classes,
+    names: HashMap<usize, &'a str>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
     /// The `Instruction`s to generate each layer in the trie.
@@ -239,6 +242,8 @@ pub struct Bindings<'a, 'b> {
     /// A lazy trie over the bindings.
     trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
 }
+
+type Values = HashMap<usize, Value>;
 
 /// An instruction to generate one layer of the trie.
 enum Instruction {
@@ -263,12 +268,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
     fn values_to_vars(&self, values: &Values) -> Vars<'a> {
         values
             .iter()
-            .filter_map(|(class, value)| {
-                self.classes[class]
-                    .name
-                    .as_ref()
-                    .map(|name| (name.as_str(), *value))
-            })
+            .filter_map(|(class, value)| self.names.get(class).map(|name| (*name, *value)))
             .collect()
     }
 

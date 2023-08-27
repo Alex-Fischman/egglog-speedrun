@@ -11,7 +11,6 @@ pub struct Source {
 }
 
 /// A slice of a `Source` string.
-#[derive(Clone)]
 pub struct Slice<'a> {
     /// The `Source` that this slice comes from.
     pub source: &'a Source,

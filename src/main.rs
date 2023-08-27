@@ -44,19 +44,20 @@ fn run() -> Result<(), String> {
                 database.function(f, xs, merge)?;
             }
             Command::Rule(slice, patterns, actions) => {
-                database.rule(Query::new(slice, &database.funcs(), &patterns)?, actions)?;
+                database.rule(Query::new(slice, &database.funcs(), patterns)?, actions)?;
             }
             Command::Action(action) => {
                 database.action(&action)?;
             }
             Command::Run(_) => database.run()?,
             Command::Check(slice, patterns) => {
-                if database.check(&Query::new(slice.clone(), &database.funcs(), &patterns)?)? {
+                let string = format!("{slice}");
+                if database.check(&Query::new(slice, &database.funcs(), patterns)?)? {
                     print!("success: ");
                 } else {
                     print!("failure: ");
                 }
-                println!("{slice}");
+                println!("{string}");
             }
         }
     }
