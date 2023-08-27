@@ -7,6 +7,8 @@ const EXAMPLES: &str = "examples";
 
 #[test]
 fn test_examples() {
+    let mut errors = 0;
+
     for example in std::fs::read_dir(std::path::Path::new(EXAMPLES))
         .unwrap()
         .map(Result::unwrap)
@@ -36,6 +38,13 @@ fn test_examples() {
         let expected = std::fs::read_to_string(&expected)
             .unwrap_or_else(|_| panic!("could not read {}", expected.display()));
 
-        assert_eq!(expected, actual);
+        if actual != expected {
+            errors += 1;
+            eprintln!("failure when running {}", example.display());
+            eprintln!("expected:\n{expected}");
+            eprintln!("actual:\n{actual}");
+        }
     }
+
+    assert_eq!(0, errors);
 }
