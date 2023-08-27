@@ -309,31 +309,8 @@ impl<'a> Bindings<'a> {
             // this should never happen
             std::cmp::Ordering::Greater => panic!(),
         }
-        self.trie[height] = self.instructions[height].iter(self, values).peekable();
-    }
 
-    /// Advance the lazy trie up to `height` to the next value.
-    fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if self.trie[height].next().is_some() {
-            self.values(height)
-        } else if height == 0 {
-            Ok(None)
-        } else if let Some(values) = self.advance(height - 1)? {
-            self.build(height, values);
-            self.values(height)
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-impl Instruction {
-    fn iter<'a>(
-        &self,
-        bindings: &Bindings<'a>,
-        values: Values,
-    ) -> Box<dyn Iterator<Item = Result<Values, String>> + 'a> {
-        match self {
+        self.trie[height] = match &self.instructions[height] {
             Instruction::Row { table, classes } => {
                 let xs: Vec<Value> = classes[..classes.len() - 1]
                     .iter()
@@ -342,17 +319,17 @@ impl Instruction {
 
                 let rows: Box<dyn Iterator<Item = _>> = if xs.len() + 1 == classes.len() {
                     // We can use the function index.
-                    Box::new(bindings.funcs[table].rows_with_inputs(&xs))
+                    Box::new(self.funcs[table].rows_with_inputs(&xs))
                 } else if let Some((col, val)) = classes
                     .iter()
                     .enumerate()
                     .find_map(|(i, c)| values.get(c).map(|v| (i, *v)))
                 {
                     // We can use a column index.
-                    Box::new(bindings.funcs[table].rows_with_value_in_column(val, col))
+                    Box::new(self.funcs[table].rows_with_value_in_column(val, col))
                 } else {
                     // We don't know any columns so we have to enumerate the whole table.
-                    Box::new(bindings.funcs[table].rows())
+                    Box::new(self.funcs[table].rows())
                 };
 
                 let classes = classes.clone();
@@ -385,14 +362,31 @@ impl Instruction {
                 )
             }
             Instruction::Expr { expr, class } => {
-                match expr.evaluate(&bindings.values_to_vars(&values), bindings.funcs) {
+                match expr.evaluate(&self.values_to_vars(&values), self.funcs) {
                     Err(e) => Box::new(std::iter::once(Err(e))),
                     Ok(value) => match values.get(class) {
-                        Some(v) if *v != value => Box::new(std::iter::empty()),
+                        Some(v) if *v != value => {
+                            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
+                        }
                         _ => Box::new(std::iter::once(Ok(HashMap::from([(*class, value)])))),
                     },
                 }
             }
+        }
+        .peekable();
+    }
+
+    /// Advance the lazy trie up to `height` to the next value.
+    fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
+        if self.trie[height].next().is_some() {
+            self.values(height)
+        } else if height == 0 {
+            Ok(None)
+        } else if let Some(values) = self.advance(height - 1)? {
+            self.build(height, values);
+            self.values(height)
+        } else {
+            Ok(None)
         }
     }
 }
