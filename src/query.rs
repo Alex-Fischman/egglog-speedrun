@@ -362,7 +362,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 )
             }
             Instruction::Expr { expr, class } => {
-                match expr.evaluate(&self.values_to_vars(&values), self.funcs) {
+                match expr.evaluate_ref(&self.values_to_vars(&values), self.funcs) {
                     Err(e) => Box::new(std::iter::once(Err(e))),
                     Ok(value) => match values.get(class) {
                         Some(v) if *v != value => {
