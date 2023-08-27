@@ -7,7 +7,7 @@ use crate::*;
 pub struct Database<'a> {
     rules: Vec<(Query<'a>, Vec<Action<'a>>)>,
     funcs: Funcs,
-    sorts: Vec<String>,
+    sorts: Sorts,
 }
 
 impl Display for Database<'_> {
@@ -31,10 +31,10 @@ impl Display for Database<'_> {
 impl<'a> Database<'a> {
     /// Add a sort to this `Database`.
     pub fn sort(&mut self, sort: String) -> Result<&mut Database<'a>, String> {
-        if self.sorts.contains(&sort) {
+        if self.sorts.contains_key(&sort) {
             return Err(format!("{sort} was declared twice"));
         }
-        self.sorts.push(sort);
+        self.sorts.insert(sort, UnionFind::default());
         Ok(self)
     }
 
@@ -64,7 +64,7 @@ impl<'a> Database<'a> {
 
     /// Run an action to this `Database`.
     pub fn action(&mut self, action: &Action) -> Result<&mut Database<'a>, String> {
-        run_action(action, &HashMap::new(), &mut self.funcs)?;
+        run_action(action, &HashMap::new(), &mut self.funcs, &mut self.sorts)?;
         Ok(self)
     }
 
@@ -86,7 +86,7 @@ impl<'a> Database<'a> {
                 let bindings: Vec<Vars> = query.run(&self.funcs)?.collect::<Result<_, _>>()?;
                 for vars in bindings {
                     for action in actions {
-                        if run_action(action, &vars, &mut self.funcs)? {
+                        if run_action(action, &vars, &mut self.funcs, &mut self.sorts)? {
                             changed = true;
                         }
                     }
@@ -105,13 +105,18 @@ impl<'a> Database<'a> {
 
 /// Returns true if running the action changed `funcs`.
 /// Not a method on `Database` because we need to not borrow `rules`.
-fn run_action(action: &Action, vars: &Vars, funcs: &mut Funcs) -> Result<bool, String> {
+fn run_action(
+    action: &Action,
+    vars: &Vars,
+    funcs: &mut Funcs,
+    sorts: &mut Sorts,
+) -> Result<bool, String> {
     match action {
         Action::Insert(_, f, xs, y) => {
             let row = xs
                 .iter()
                 .chain([y])
-                .map(|x| x.evaluate(vars, funcs))
+                .map(|x| x.evaluate_mut(vars, funcs, sorts))
                 .collect::<Result<Vec<_>, _>>()?;
             let changed = funcs
                 .get_mut(f.as_str())
