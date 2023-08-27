@@ -20,6 +20,7 @@ pub struct Query<'a> {
 struct EqClass {
     name: Option<String>,
     exprs: Vec<Expr>,
+    calls: Vec<(String, Vec<usize>)>,
 }
 
 impl Query<'_> {
@@ -43,6 +44,10 @@ impl Query<'_> {
                 exprs: {
                     a.exprs.append(&mut b.exprs);
                     a.exprs
+                },
+                calls: {
+                    a.calls.append(&mut b.calls);
+                    a.calls
                 },
             })
         });
@@ -132,6 +137,12 @@ impl Query<'_> {
         let mut known: HashSet<usize> = HashSet::new();
         // `Expr` indices that haven't been calculated yet.
         let mut exprs: HashSet<(usize, usize)> = self.dependencies.keys().copied().collect();
+        // Call indices that haven't been calculated yet.
+        let mut calls: HashSet<(usize, usize)> = self
+            .classes
+            .iter()
+            .flat_map(|(k, v)| (0..v.calls.len()).map(|i| (*k, i)))
+            .collect();
         // Row constraints that haven't been calculated yet.
         let mut rows: Vec<_> = self.rows.iter().cloned().collect();
         rows.sort_unstable(); // determinism
@@ -156,18 +167,46 @@ impl Query<'_> {
                 calculable_exprs
                     .iter()
                     .map(|&(class, j)| Instruction::Expr {
-                        expr: self.classes[&class].exprs[j].clone(),
+                        expr: &self.classes[&class].exprs[j],
                         class,
                     }),
             );
 
-            if let Some((table, classes)) = rows.pop() {
-                // Add a `Row` instruction.
-                known.extend(classes.iter());
-                instructions.push(Instruction::Row { table, classes });
-            } else if calculable_exprs.is_empty() && rows.is_empty() {
-                // If there aren't any rows and no exprs were added, there's a cycle.
-                return Err(format!("dependency cycle in {}", self.slice));
+            // Do the same for calls.
+            let mut calculable_calls: Vec<_> = calls
+                .iter()
+                .copied()
+                .filter(|(class, call)| {
+                    self.classes[class].calls[*call]
+                        .1
+                        .iter()
+                        .copied()
+                        .collect::<HashSet<_>>()
+                        .is_subset(&known)
+                })
+                .collect();
+            for call in &calculable_calls {
+                assert!(calls.remove(call));
+            }
+            calculable_calls.sort_unstable(); // determinism
+            calculable_calls.sort_by_key(|(i, _)| !known.contains(i)); // efficiency
+
+            known.extend(calculable_calls.iter().map(|(class, _)| class));
+            instructions.extend(calculable_calls.iter().map(|&(class, j)| {
+                let (table, mut classes) = self.classes[&class].calls[j].clone();
+                classes.push(class);
+                Instruction::Row { table, classes }
+            }));
+
+            if calculable_exprs.is_empty() && calculable_calls.is_empty() {
+                if let Some((table, classes)) = rows.pop() {
+                    // Add a `Row` instruction.
+                    known.extend(classes.iter());
+                    instructions.push(Instruction::Row { table, classes });
+                } else {
+                    // If there aren't any rows and nothing was calculable, there's a cycle.
+                    return Err(format!("dependency cycle in {}", self.slice));
+                }
             }
         }
 
@@ -192,7 +231,7 @@ fn eqs_from_expr(
 ) -> Result<usize, String> {
     Ok(match expr {
         Expr::Var(var) => eqs.new_key(EqClass {
-            name: Some(var.clone()),
+            name: Some(var),
             ..EqClass::default()
         }),
         Expr::Call(f, xs) if funcs.contains(&f) => {
@@ -201,10 +240,12 @@ fn eqs_from_expr(
                 let x = eqs_from_expr(x, funcs, eqs, rows)?;
                 row.push(x);
             }
-            let y = eqs.new_key(EqClass::default());
+            let y = eqs.new_key(EqClass {
+                calls: vec![(f.clone(), row.clone())],
+                ..EqClass::default()
+            });
             row.push(y);
-
-            rows.push((f.clone(), row));
+            rows.push((f, row));
             y
         }
         _ => eqs.new_key(EqClass {
@@ -232,13 +273,14 @@ fn deps_from_expr(
 }
 
 /// An iterator over all possible variable assignments that match a `Query`.
+// There are two lifetimes because `'a` comes from the `Query` but `'b` comes from the `Database`.
 pub struct Bindings<'a, 'b> {
     /// See `Query`.
     names: HashMap<usize, &'a str>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
     /// The `Instruction`s to generate each layer in the trie.
-    instructions: Vec<Instruction>,
+    instructions: Vec<Instruction<'a>>,
     /// A lazy trie over the bindings.
     trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
 }
@@ -246,20 +288,20 @@ pub struct Bindings<'a, 'b> {
 type Values = HashMap<usize, Value>;
 
 /// An instruction to generate one layer of the trie.
-enum Instruction {
+enum Instruction<'a> {
+    /// Compute an expression.
+    Expr {
+        /// The expression to evaluate
+        expr: &'a Expr,
+        /// The class to check the expression against
+        class: usize,
+    },
     /// Iterate over all rows in a table
     Row {
         /// The name of the table to iterate over
         table: String,
         /// The classes to map the values in the columns into
         classes: Vec<usize>,
-    },
-    /// Compute an expression
-    Expr {
-        /// The expression to evaluate
-        expr: Expr,
-        /// The class to check the expression against
-        class: usize,
     },
 }
 
@@ -297,6 +339,20 @@ impl<'a, 'b> Bindings<'a, 'b> {
         }
     }
 
+    /// Advance the lazy trie up to `height` to the next value.
+    fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
+        if self.trie[height].next().is_some() {
+            self.values(height)
+        } else if height == 0 {
+            Ok(None)
+        } else if let Some(values) = self.advance(height - 1)? {
+            self.build(height, values);
+            self.values(height)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Build a single layer of the trie.
     fn build(&mut self, height: usize, values: Values) {
         match height.cmp(&self.trie.len()) {
@@ -311,6 +367,17 @@ impl<'a, 'b> Bindings<'a, 'b> {
         }
 
         self.trie[height] = match &self.instructions[height] {
+            Instruction::Expr { expr, class } => {
+                match expr.evaluate_ref(&self.values_to_vars(&values), self.funcs) {
+                    Err(e) => Box::new(std::iter::once(Err(e))),
+                    Ok(value) => match values.get(class) {
+                        Some(v) if *v != value => {
+                            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
+                        }
+                        _ => Box::new(std::iter::once(Ok(HashMap::from([(*class, value)])))),
+                    },
+                }
+            }
             Instruction::Row { table, classes } => {
                 let xs: Vec<Value> = classes[..classes.len() - 1]
                     .iter()
@@ -361,33 +428,8 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     }),
                 )
             }
-            Instruction::Expr { expr, class } => {
-                match expr.evaluate_ref(&self.values_to_vars(&values), self.funcs) {
-                    Err(e) => Box::new(std::iter::once(Err(e))),
-                    Ok(value) => match values.get(class) {
-                        Some(v) if *v != value => {
-                            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _>>
-                        }
-                        _ => Box::new(std::iter::once(Ok(HashMap::from([(*class, value)])))),
-                    },
-                }
-            }
         }
         .peekable();
-    }
-
-    /// Advance the lazy trie up to `height` to the next value.
-    fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if self.trie[height].next().is_some() {
-            self.values(height)
-        } else if height == 0 {
-            Ok(None)
-        } else if let Some(values) = self.advance(height - 1)? {
-            self.build(height, values);
-            self.values(height)
-        } else {
-            Ok(None)
-        }
     }
 }
 
