@@ -92,13 +92,14 @@ impl Value {
     }
 }
 
+/// A map from variable names to `Value`s.
+pub type Vars<'a> = HashMap<&'a str, Value>;
+/// A map from function names to `Table`s.
+pub type Funcs = HashMap<String, Table>;
+
 impl Expr {
     /// Get a `Value` from an `Expr` under a given context.
-    pub fn evaluate(
-        &self,
-        vars: &HashMap<&str, Value>,
-        funcs: &HashMap<String, Table>,
-    ) -> Result<Value, String> {
+    pub fn evaluate(&self, vars: &Vars, funcs: &Funcs) -> Result<Value, String> {
         let int = |expr: &Expr| match expr.evaluate(vars, funcs)? {
             Value::Int(i) => Ok(i),
             v => Err(format!("expected {}, found {v}", Type::Int)),

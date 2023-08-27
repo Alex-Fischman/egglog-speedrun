@@ -5,9 +5,9 @@ use crate::*;
 /// The current state of the `egglog` program.
 #[derive(Default)]
 pub struct Database<'a> {
-    sorts: Vec<String>,
-    funcs: HashMap<String, Table>,
     rules: Vec<(Query<'a>, Vec<Action<'a>>)>,
+    funcs: Funcs,
+    sorts: Vec<String>,
 }
 
 impl Display for Database<'_> {
@@ -106,11 +106,7 @@ impl<'a> Database<'a> {
 
 /// Returns true if running the action changed `funcs`.
 /// Not a method on `Database` because we need to not borrow `rules`.
-fn run_action(
-    action: &Action,
-    vars: &HashMap<&str, Value>,
-    funcs: &mut HashMap<String, Table>,
-) -> Result<bool, String> {
+fn run_action(action: &Action, vars: &Vars, funcs: &mut Funcs) -> Result<bool, String> {
     match action {
         Action::Insert(_, f, xs, y) => {
             let row = xs

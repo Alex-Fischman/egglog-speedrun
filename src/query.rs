@@ -8,13 +8,16 @@ pub struct Query<'a> {
     /// The slice that generated this query.
     slice: Slice<'a>,
     /// A list of `EqClasses`, each with a unique `usize` name.
-    classes: HashMap<usize, EqClass>,
+    classes: Classes,
     /// A list of row constraints, where each class must come from the same row in the table.
     rows: HashSet<(String, Vec<usize>)>,
     /// The dependency map used to generate an ordering. The keys are (class, expr) pairs,
     /// and the values are sets of class indices that need to be computed before the expr.
     dependencies: HashMap<(usize, usize), HashSet<usize>>,
 }
+
+type Classes = HashMap<usize, EqClass>;
+type Values = HashMap<usize, Value>;
 
 #[derive(Default)]
 struct EqClass {
@@ -98,7 +101,7 @@ impl<'a> Query<'a> {
             .collect();
 
         // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
-        let classes: HashMap<_, _> = eqs.into_iter().collect();
+        let classes: Classes = eqs.into_iter().collect();
 
         // Compute dependency constraints, which give an ordering for `Expr` computation.
         let mut dependencies: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
@@ -119,7 +122,7 @@ impl<'a> Query<'a> {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    pub fn run(&'a self, funcs: &'a HashMap<String, Table>) -> Result<Bindings<'a>, String> {
+    pub fn run(&'a self, funcs: &'a Funcs) -> Result<Bindings<'a>, String> {
         // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
         // The classes that the current value of `instructions` computes.
@@ -211,7 +214,7 @@ fn eqs_from_expr(
 fn deps_from_expr(
     // The `Expr` to find the dependencies of.
     expr: &Expr,
-    // A map from variable names to canoncial keys.
+    // A map from variable names to canonical keys.
     names: &HashMap<String, usize>,
     // The set of dependencies.
     deps: &mut HashSet<usize>,
@@ -228,15 +231,13 @@ fn deps_from_expr(
 /// An iterator over all possible variable assignments that match a `Query`.
 pub struct Bindings<'a> {
     /// See `Query`.
-    classes: &'a HashMap<usize, EqClass>,
+    classes: &'a Classes,
     /// The current state of the `Table`s in the `Database`.
-    funcs: &'a HashMap<String, Table>,
+    funcs: &'a Funcs,
     /// The `Instruction`s to generate each layer in the trie.
     instructions: Vec<Instruction>,
     /// A lazy trie over the bindings.
-    trie: Vec<
-        std::iter::Peekable<Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a>>,
-    >,
+    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'a>>>,
 }
 
 /// An instruction to generate one layer of the trie.
@@ -259,7 +260,7 @@ enum Instruction {
 
 impl<'a> Bindings<'a> {
     /// Convert the keys of a map from classes to names.
-    fn values_to_vars(&self, values: &HashMap<usize, Value>) -> HashMap<&'a str, Value> {
+    fn values_to_vars(&self, values: &Values) -> Vars<'a> {
         values
             .iter()
             .filter_map(|(class, value)| {
@@ -272,7 +273,7 @@ impl<'a> Bindings<'a> {
     }
 
     /// Get the current values map up to and including `height`.
-    fn values(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
+    fn values(&mut self, height: usize) -> Result<Option<Values>, String> {
         let mut values = if height == 0 {
             HashMap::new()
         } else if let Some(values) = self.values(height - 1)? {
@@ -297,7 +298,7 @@ impl<'a> Bindings<'a> {
     }
 
     /// Build a single layer of the trie.
-    fn build(&mut self, height: usize, values: HashMap<usize, Value>) {
+    fn build(&mut self, height: usize, values: Values) {
         match height.cmp(&self.trie.len()) {
             // trie has been built
             std::cmp::Ordering::Less => assert!(self.trie[height].peek().is_none()),
@@ -312,7 +313,7 @@ impl<'a> Bindings<'a> {
     }
 
     /// Advance the lazy trie up to `height` to the next value.
-    fn advance(&mut self, height: usize) -> Result<Option<HashMap<usize, Value>>, String> {
+    fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
         if self.trie[height].next().is_some() {
             self.values(height)
         } else if height == 0 {
@@ -330,8 +331,8 @@ impl Instruction {
     fn iter<'a>(
         &self,
         bindings: &Bindings<'a>,
-        values: HashMap<usize, Value>,
-    ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
+        values: Values,
+    ) -> Box<dyn Iterator<Item = Result<Values, String>> + 'a> {
         match self {
             Instruction::Row { table, classes } => {
                 let xs: Vec<Value> = classes[..classes.len() - 1]
@@ -363,26 +364,24 @@ impl Instruction {
                             .zip(row.iter().copied())
                             .collect())
                     })
-                    .filter_map(
-                        move |result: Result<HashMap<usize, Value>, String>| match result {
-                            Err(e) => Some(Err(e)),
-                            Ok(map) => {
-                                let mut values = values.clone();
-                                if map.iter().all(|(class, value)| {
-                                    if let Some(v) = values.get(class) {
-                                        v == value
-                                    } else {
-                                        values.insert(*class, *value);
-                                        true
-                                    }
-                                }) {
-                                    Some(Ok(map))
+                    .filter_map(move |result: Result<Values, String>| match result {
+                        Err(e) => Some(Err(e)),
+                        Ok(map) => {
+                            let mut values = values.clone();
+                            if map.iter().all(|(class, value)| {
+                                if let Some(v) = values.get(class) {
+                                    v == value
                                 } else {
-                                    None
+                                    values.insert(*class, *value);
+                                    true
                                 }
+                            }) {
+                                Some(Ok(map))
+                            } else {
+                                None
                             }
-                        },
-                    ),
+                        }
+                    }),
                 )
             }
             Instruction::Expr { expr, class } => {
@@ -399,8 +398,8 @@ impl Instruction {
 }
 
 impl<'a> Iterator for Bindings<'a> {
-    type Item = Result<HashMap<&'a str, Value>, String>;
-    fn next(&mut self) -> Option<Result<HashMap<&'a str, Value>, String>> {
+    type Item = Result<Vars<'a>, String>;
+    fn next(&mut self) -> Option<Result<Vars<'a>, String>> {
         // fun with nesting
         match if self.trie.is_empty() {
             for i in 0..self.instructions.len() {
