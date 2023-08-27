@@ -163,8 +163,12 @@ impl Expr {
                     Some(i) => Ok(Some(Value::Int(i))),
                     None => Ok(None),
                 },
-                ("min", [_, ..]) => {
-                    match ints(xs)?.into_iter().reduce(|a, b| Some(a? + b?)).unwrap() {
+                ("min", _) => {
+                    match ints(xs)?
+                        .into_iter()
+                        .reduce(|a, b| Some(a?.min(b?)))
+                        .ok_or(format!("need at least one argument for {self}"))?
+                    {
                         Some(i) => Ok(Some(Value::Int(i))),
                         None => Ok(None),
                     }
