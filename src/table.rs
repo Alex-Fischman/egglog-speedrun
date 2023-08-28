@@ -124,12 +124,51 @@ impl Table {
         })
     }
 
+    /// Rebuild the indices so that each `Value::Sort` holds a canonical key.
+    pub fn rebuild(&mut self, _sorts: &mut Sorts) -> bool {
+        false
+        // let mut changed = false;
+        // // Rebuild the function index
+        // for (column, t) in self.schema.iter().enumerate() {
+        //     if let Type::Sort(s) = t {
+        //         let uf = sorts.get_mut(s).unwrap();
+        //         let rows: Vec<_> = self.function.keys().collect();
+        //         for row in rows {
+        //             let key = match row.get(column) {
+        //                 Some(Value::Sort(key)) => *key,
+        //                 _ => unreachable!("we do typechecking on insertion"),
+        //             };
+        //             if key != uf.find(key) {
+        //                 changed = true;
+        //                 if column + 1 < self.schema.len() {
+        //                     // Rebuild an input column, doing congruence closure if two
+        //                     // rows end up with the same inputs but different outputs.
+        //                     let _old_id = self.function.remove(row);
+        //                     todo!()
+        //                 } else {
+        //                     // Rebuild the output column, marking one row as dead if two
+        //                     // rows end up being exactly identical.
+        //                     todo!()
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        // // Rebuild all the column indices
+        // for (column, map) in self.columns.iter_mut().enumerate() {
+        //     map.clear();
+        //     for (xs, &id) in self.function.iter() {
+        //         map.entry(xs[column]).or_default().insert(id);
+        //     }
+        // }
+        // changed
+    }
+
     /// Get all of the rows in this table.
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
-        self.primary
-            .iter()
-            .filter(|(_, live)| *live)
-            .map(|(row, _)| row.as_slice())
+        self.function
+            .values()
+            .map(|&id| self.primary[id].0.as_slice())
     }
 
     /// Get the (at most) one row in this table with the specific inputs in the input columns.

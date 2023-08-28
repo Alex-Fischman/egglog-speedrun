@@ -92,6 +92,11 @@ impl<'a> Database<'a> {
                     }
                 }
             }
+            for table in self.funcs.values_mut() {
+                if table.rebuild(&mut self.sorts) {
+                    changed = true;
+                }
+            }
         }
         Ok(())
     }
