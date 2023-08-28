@@ -1,0 +1,2 @@
+success: (check (edge (node 2) (node 4))) at examples/path_reach_union.egg:16:1
+success: (check (path (node 0) (node 4))) at examples/path_reach_union.egg:17:1
