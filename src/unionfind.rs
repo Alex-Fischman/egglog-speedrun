@@ -108,6 +108,11 @@ impl<'a, V> UnionFind<'a, V> {
         Ok(())
     }
 
+    /// Get all of the keys in this `UnionFind`.
+    pub fn keys(&self) -> impl Iterator<Item = usize> {
+        0..self.trees.len()
+    }
+
     /// Get all of the canonical keys and their values in this `UnionFind`.
     pub fn iter(&self) -> impl Iterator<Item = (usize, &V)> {
         self.trees.iter().enumerate().filter_map(|(k, v)| match v {

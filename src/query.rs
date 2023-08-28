@@ -80,13 +80,20 @@ impl Query<'_> {
         }
 
         // Change keys to canonical keys.
+        let canonicalize: HashMap<usize, usize> = eqs.keys().map(|k| (k, eqs.find(k))).collect();
+        // We're about to do stuff with canonical keys, so don't touch `eqs` anymore.
+        let mut classes: HashMap<usize, EqClass> = eqs.into_iter().collect();
+
         let names_to_keys: HashMap<String, usize> = names_to_keys
             .into_iter()
-            .map(|(k, v)| (k, eqs.find(v[0])))
+            .map(|(k, v)| (k, canonicalize[&v[0]]))
             .collect();
 
-        // We're about to do stuff with canoncial keys, so don't touch `eqs` anymore.
-        let classes: HashMap<usize, EqClass> = eqs.into_iter().collect();
+        for v in classes.values_mut() {
+            v.calls
+                .iter_mut()
+                .for_each(|(_, xs)| xs.iter_mut().for_each(|v| *v = canonicalize[v]));
+        }
 
         // Compute dependency constraints which give an ordering for `Expr` computation.
         let mut expr_deps: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();

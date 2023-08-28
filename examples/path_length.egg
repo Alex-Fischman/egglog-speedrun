@@ -1,8 +1,8 @@
 (function edge (i64 i64) i64)
 (function path (i64 i64) i64 :merge (min old new))
 
-(rule ((= (path x y) xy) (= (edge y z) yz)) ((set (path x z) (+ xy yz))))
 (rule ((= (edge x y) len)) ((set (path x y) len)))
+(rule ((= (path x y) xy) (= (edge y z) yz)) ((set (path x z) (+ xy yz))))
 
 (set (edge 1 2) 10)
 (set (edge 2 3) 10)
