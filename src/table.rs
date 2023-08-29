@@ -125,30 +125,45 @@ impl Table {
     }
 
     /// Rebuild the indices so that each `Value::Sort` holds a canonical key.
-    pub fn rebuild(&mut self, sorts: &mut Sorts) -> bool {
-        let mut changed = false;
-        for (column, t) in self.schema.clone().into_iter().enumerate() {
-            if let Type::Sort(s) = t {
-                let ids: Vec<_> = self.function.values().copied().collect();
-                for id in ids {
-                    let mut row = self.primary[id].0.clone();
-                    if let Value::Sort(old) = row[column] {
-                        let new = sorts.get_mut(&s).unwrap().find(old);
+    pub fn rebuild(&mut self, sorts: &mut Sorts) -> Result<bool, String> {
+        let mut ever_changed = false;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let ids: Vec<_> = self.function.values().copied().collect();
+            for id_a in ids {
+                for (column, t) in self.schema.clone().into_iter().enumerate() {
+                    if let Type::Sort(s) = t {
+                        let uf = sorts.get_mut(&s).unwrap();
+                        let mut row = self.primary[id_a].0.clone();
+                        let Value::Sort(old) = row[column] else {
+                            unreachable!("we check types on insertion")
+                        };
+                        let new = uf.find(old);
                         if old != new {
+                            // Remove the bad row.
                             changed = true;
-                            self.remove_row(id);
+                            self.remove_row(id_a);
+
+                            // Either do congruence closure or re-append the updated row.
                             row[column] = Value::Sort(new);
-                            if self.function.get(&row).is_none() {
+                            if let Some(&id_b) = self.function.get(&row[..row.len() - 1]) {
+                                let (Value::Sort(a), Value::Sort(b)) =
+                                    (row[row.len() - 1], self.primary[id_b].0[row.len() - 1])
+                                else {
+                                    unreachable!("we check types on insertion")
+                                };
+                                uf.union(a, b)?;
+                            } else {
                                 self.append_row(row);
                             }
                         }
-                    } else {
-                        unreachable!("we do type checking on insertion")
                     }
                 }
             }
+            ever_changed |= changed;
         }
-        changed
+        Ok(ever_changed)
     }
 
     /// Get all of the live rows in this table.
