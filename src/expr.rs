@@ -81,7 +81,13 @@ impl Expr {
             Expr::Unit => Ok(Type::Unit),
             Expr::Int(_) => Ok(Type::Int),
             Expr::Var(_) => Err(format!("unknown type for {self}")),
-            Expr::Call(f, _) => Ok(funcs[f].schema().last().unwrap().clone()),
+            Expr::Call(f, _) => match f.as_str() {
+                "+" | "min" => Ok(Type::Int),
+                _ => {
+                    let func = funcs.get(f).ok_or(format!("unknown function {f}"))?;
+                    Ok(func.schema().last().unwrap().clone())
+                }
+            },
         }
     }
 }
