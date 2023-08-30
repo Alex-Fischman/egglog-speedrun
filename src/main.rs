@@ -7,6 +7,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::similar_names)]
 #![allow(clippy::many_single_char_names)]
+#![allow(clippy::too_many_lines)]
 
 pub mod database;
 pub mod expr;
