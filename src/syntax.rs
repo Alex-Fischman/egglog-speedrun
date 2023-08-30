@@ -263,12 +263,14 @@ impl<'a> Sexp<'a> {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    fn to_command(self) -> Result<Command<'a>, String> {
+    fn to_commands(self) -> Result<Vec<Command<'a>>, String> {
         match self {
             Sexp::List(slice, mut list) => match list.get(0) {
                 Some(Sexp::Atom(command)) => match command.as_str() {
                     "sort" => match list.as_slice() {
-                        [_, Sexp::Atom(sort)] => Ok(Command::Sort(slice, sort.as_str().to_owned())),
+                        [_, Sexp::Atom(sort)] => {
+                            Ok(vec![Command::Sort(slice, sort.as_str().to_owned())])
+                        }
                         _ => Err(format!("expected `sort` command, found {slice}")),
                     },
                     "function" => match list.as_slice() {
@@ -291,20 +293,56 @@ impl<'a> Sexp<'a> {
                                     _ => return Err(format!("unknown option {key}")),
                                 }
                             }
-                            Ok(Command::Function(slice, f, xs, y, merge))
+                            Ok(vec![Command::Function(slice, f, xs, y, merge)])
                         }
                         _ => Err(format!("expected `function` command, found {slice}")),
                     },
                     "relation" => match list.as_slice() {
-                        [_, Sexp::Atom(f), Sexp::List(_, xs)] => Ok(Command::Function(
+                        [_, Sexp::Atom(f), Sexp::List(_, xs)] => Ok(vec![Command::Function(
                             slice,
                             f.as_str().to_owned(),
                             xs.iter().map(Sexp::to_type).collect::<Result<_, _>>()?,
                             Type::Unit,
                             None,
-                        )),
+                        )]),
                         _ => Err(format!("expected `relation` command, found {slice}")),
                     },
+                    "datatype" => {
+                        if let [_, Sexp::Atom(name), ..] = list.as_slice() {
+                            let name = name.as_str().to_owned();
+                            let mut out = vec![Command::Sort(slice, name.clone())];
+                            for variant in list.drain(2..) {
+                                match variant {
+                                    Sexp::List(slice, list) => match list.as_slice() {
+                                        [Sexp::Atom(variant), xs @ ..] => {
+                                            out.push(Command::Function(
+                                                slice,
+                                                variant.as_str().to_owned(),
+                                                xs.iter()
+                                                    .map(Sexp::to_type)
+                                                    .collect::<Result<_, _>>()?,
+                                                Type::Sort(name.clone()),
+                                                None,
+                                            ));
+                                        }
+                                        _ => {
+                                            return Err(format!(
+                                                "expected `datatype` variant, found {slice}"
+                                            ))
+                                        }
+                                    },
+                                    Sexp::Atom(slice) => {
+                                        return Err(format!(
+                                            "expected `datatype` variant, found {slice}"
+                                        ))
+                                    }
+                                }
+                            }
+                            Ok(out)
+                        } else {
+                            Err(format!("expected `datatype` command, found {slice}"))
+                        }
+                    }
                     "rule" => match list.as_slice() {
                         [_, Sexp::List(_, patterns), Sexp::List(..)] => {
                             let patterns: Vec<_> = patterns
@@ -318,25 +356,25 @@ impl<'a> Sexp<'a> {
                                     .collect::<Result<_, _>>()?,
                                 Sexp::Atom(_) => unreachable!(),
                             };
-                            Ok(Command::Rule(slice, patterns, actions))
+                            Ok(vec![Command::Rule(slice, patterns, actions)])
                         }
                         _ => Err(format!("expeted `rule` command, found {slice}")),
                     },
                     "run" => match list.as_slice() {
-                        [_] => Ok(Command::Run(slice)),
+                        [_] => Ok(vec![Command::Run(slice)]),
                         _ => Err(format!("expeted `run` command, found {slice}")),
                     },
                     "check" => match list.as_slice() {
-                        [_, patterns @ ..] => Ok(Command::Check(
+                        [_, patterns @ ..] => Ok(vec![Command::Check(
                             slice,
                             patterns
                                 .iter()
                                 .map(Sexp::to_pattern)
                                 .collect::<Result<Vec<_>, _>>()?,
-                        )),
+                        )]),
                         _ => Err(format!("expeted `check` command, found {slice}")),
                     },
-                    _ => Ok(Command::Action(Sexp::List(slice, list).to_action()?)),
+                    _ => Ok(vec![Command::Action(Sexp::List(slice, list).to_action()?)]),
                 },
                 _ => Err(format!("expected command, found {slice}")),
             },
@@ -392,5 +430,9 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     }
 
     // translate sexps into commands
-    sexps.into_iter().map(Sexp::to_command).collect()
+    let mut commands = Vec::new();
+    for sexp in sexps {
+        commands.append(&mut sexp.to_commands()?);
+    }
+    Ok(commands)
 }
