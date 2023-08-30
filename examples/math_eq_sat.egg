@@ -1,0 +1,16 @@
+(datatype Math
+	(Num i64)
+	(Var String)
+	(Add Math Math)
+	(Mul Math Math))
+
+(define expr1 (Mul (Num 2) (Add (Var "x") (Num 3))))
+(define expr2 (Add (Num 6) (Mul (Num 2) (Var "x"))))
+
+(rewrite (Add a b) (Add b a))
+(rewrite (Mul a (Add b c)) (Add (Mul a b) (Mul a c)))
+(rewrite (Add (Num a) (Num b)) (Num (+ a b)))
+(rewrite (Mul (Num a) (Num b)) (Num (* a b)))
+
+(run)
+(check (= expr1 expr2))
