@@ -77,7 +77,7 @@ pub enum Action<'a> {
     /// Add a row to table `f`, merging if necessary.
     Insert(Slice<'a>, String, Vec<Expr>, Expr),
     /// Union two elements of a sort together.
-    Union(Expr, Expr),
+    Union(Expr, Expr, String),
 }
 
 impl Display for Action<'_> {
@@ -91,7 +91,7 @@ impl Display for Action<'_> {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Action::Union(x, y) => write!(f, "(union {x} {y})"),
+            Action::Union(x, y, _) => write!(f, "(union {x} {y})"),
         }
     }
 }
@@ -232,7 +232,7 @@ impl<'a> Sexp<'a> {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    fn to_action(self) -> Result<Action<'a>, String> {
+    fn to_action(self, funcs: &HashMap<String, Type>) -> Result<Action<'a>, String> {
         match self {
             Sexp::List(slice, list) => match list.get(0) {
                 Some(Sexp::Atom(action)) => match action.as_str() {
@@ -244,7 +244,15 @@ impl<'a> Sexp<'a> {
                         _ => Err(format!("expected `set` action, found {slice}")),
                     },
                     "union" => match list.as_slice() {
-                        [_, x, y] => Ok(Action::Union(x.to_expr()?, y.to_expr()?)),
+                        [_, x, y] => {
+                            let (x, y) = (x.to_expr()?, y.to_expr()?);
+                            match (x.get_type(funcs)?, y.get_type(funcs)?) {
+                                (Type::Sort(sx), Type::Sort(sy)) if sx == sy => {
+                                    Ok(Action::Union(x, y, sx))
+                                }
+                                _ => Err(format!("expected matching sorts, found {slice}")),
+                            }
+                        }
                         _ => Err(format!("expected `union` action, found {slice}")),
                     },
                     f => match list[1..]
@@ -263,7 +271,7 @@ impl<'a> Sexp<'a> {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    fn to_commands(self) -> Result<Vec<Command<'a>>, String> {
+    fn to_commands(self, funcs: &HashMap<String, Type>) -> Result<Vec<Command<'a>>, String> {
         match self {
             Sexp::List(slice, mut list) => match list.get(0) {
                 Some(Sexp::Atom(command)) => match command.as_str() {
@@ -343,6 +351,28 @@ impl<'a> Sexp<'a> {
                             Err(format!("expected `datatype` command, found {slice}"))
                         }
                     }
+                    "define" => match list.as_slice() {
+                        [_, Sexp::Atom(x), e] => Ok(vec![
+                            Command::Function(
+                                // manual clone
+                                Slice {
+                                    source: slice.source,
+                                    range: slice.range.start..slice.range.end,
+                                },
+                                x.as_str().to_owned(),
+                                Vec::new(),
+                                e.to_expr()?.get_type(funcs)?,
+                                None,
+                            ),
+                            Command::Action(Action::Insert(
+                                slice,
+                                x.as_str().to_owned(),
+                                Vec::new(),
+                                e.to_expr()?,
+                            )),
+                        ]),
+                        _ => Err(format!("expected `define` command, found {slice}")),
+                    },
                     "rule" => match list.as_slice() {
                         [_, Sexp::List(_, patterns), Sexp::List(..)] => {
                             let patterns: Vec<_> = patterns
@@ -352,7 +382,7 @@ impl<'a> Sexp<'a> {
                             let actions: Vec<_> = match list.remove(2) {
                                 Sexp::List(_, actions) => actions
                                     .into_iter()
-                                    .map(Sexp::to_action)
+                                    .map(|action| action.to_action(funcs))
                                     .collect::<Result<_, _>>()?,
                                 Sexp::Atom(_) => unreachable!(),
                             };
@@ -374,7 +404,9 @@ impl<'a> Sexp<'a> {
                         )]),
                         _ => Err(format!("expeted `check` command, found {slice}")),
                     },
-                    _ => Ok(vec![Command::Action(Sexp::List(slice, list).to_action()?)]),
+                    _ => Ok(vec![Command::Action(
+                        Sexp::List(slice, list).to_action(funcs)?,
+                    )]),
                 },
                 _ => Err(format!("expected command, found {slice}")),
             },
@@ -431,8 +463,28 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
 
     // translate sexps into commands
     let mut commands = Vec::new();
+    let mut funcs = HashMap::new();
     for sexp in sexps {
-        commands.append(&mut sexp.to_commands()?);
+        commands.extend(sexp.to_commands(&funcs)?.into_iter().inspect(|command| {
+            if let Command::Function(_, f, _, y, _) = command {
+                funcs.insert(f.clone(), y.clone());
+            }
+        }));
     }
     Ok(commands)
+}
+
+impl Expr {
+    /// Gets the type of this expression. `funcs` is a map to the return type.
+    fn get_type(&self, funcs: &HashMap<String, Type>) -> Result<Type, String> {
+        match self {
+            Expr::Unit => Ok(Type::Unit),
+            Expr::Int(_) => Ok(Type::Int),
+            Expr::Var(_) => Err(format!("unknown type for {self}")),
+            Expr::Call(f, _) => match f.as_str() {
+                "+" | "min" => Ok(Type::Int),
+                _ => Ok(funcs.get(f).ok_or(format!("unknown function {f}"))?.clone()),
+            },
+        }
+    }
 }

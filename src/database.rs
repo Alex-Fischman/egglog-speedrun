@@ -129,19 +129,12 @@ fn run_action(
                 .insert(row, sorts)?;
             Ok(changed)
         }
-        Action::Union(x, y) => {
-            let tx = x.get_type(funcs)?;
-            let ty = y.get_type(funcs)?;
-            let x = x.evaluate_mut(vars, funcs, sorts)?;
-            let y = y.evaluate_mut(vars, funcs, sorts)?;
-            match (x, y, tx, ty) {
-                (Value::Sort(x), Value::Sort(y), Type::Sort(sx), Type::Sort(sy)) if sx == sy => {
-                    sorts.get_mut(&sx).unwrap().union(x, y)
-                }
-                (_, _, tx, ty) => Err(format!(
-                    "expected two elements of the same sort, found {tx} and {ty}"
-                )),
-            }
-        }
+        Action::Union(x, y, sort) => match (
+            x.evaluate_mut(vars, funcs, sorts)?,
+            y.evaluate_mut(vars, funcs, sorts)?,
+        ) {
+            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(sort).unwrap().union(x, y),
+            (_, _) => unreachable!(),
+        },
     }
 }

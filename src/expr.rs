@@ -54,7 +54,7 @@ impl Display for Value {
 }
 
 /// An `egglog` type.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Type {
     /// The unit type.
     Unit,
@@ -70,24 +70,6 @@ impl Display for Type {
             Type::Unit => write!(f, "()"),
             Type::Int => write!(f, "i64"),
             Type::Sort(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl Expr {
-    /// Gets the type of this expression.
-    pub fn get_type(&self, funcs: &Funcs) -> Result<Type, String> {
-        match self {
-            Expr::Unit => Ok(Type::Unit),
-            Expr::Int(_) => Ok(Type::Int),
-            Expr::Var(_) => Err(format!("unknown type for {self}")),
-            Expr::Call(f, _) => match f.as_str() {
-                "+" | "min" => Ok(Type::Int),
-                _ => {
-                    let func = funcs.get(f).ok_or(format!("unknown function {f}"))?;
-                    Ok(func.schema().last().unwrap().clone())
-                }
-            },
         }
     }
 }
