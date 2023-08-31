@@ -8,6 +8,8 @@ pub enum Expr {
     Unit,
     /// An integer.
     Int(i64),
+    /// A string.
+    String(String),
     /// A variable.
     Var(String),
     /// A table lookup.
@@ -19,6 +21,7 @@ impl Display for Expr {
         match self {
             Expr::Unit => write!(f, "()"),
             Expr::Int(i) => write!(f, "{i}"),
+            Expr::String(s) => write!(f, "{s:?}"),
             Expr::Var(s) => write!(f, "{s}"),
             Expr::Call(f_, xs) => write!(
                 f,
@@ -33,12 +36,14 @@ impl Display for Expr {
 }
 
 /// An `egglog` value.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Value {
     /// The unit value.
     Unit,
     /// An integer.
     Int(i64),
+    /// A string.
+    String(String),
     /// An element of an uninterpreted sort.
     Sort(usize),
 }
@@ -48,6 +53,7 @@ impl Display for Value {
         match self {
             Value::Unit => write!(f, "()"),
             Value::Int(i) => write!(f, "{i}"),
+            Value::String(s) => write!(f, "{s:?}"),
             Value::Sort(s) => write!(f, "s{s}"),
         }
     }
@@ -60,6 +66,8 @@ pub enum Type {
     Unit,
     /// The type of integers (`i64` in `egglog`).
     Int,
+    /// The type of strings.
+    String,
     /// An uninterpreted sort.
     Sort(String),
 }
@@ -69,6 +77,7 @@ impl Display for Type {
         match self {
             Type::Unit => write!(f, "()"),
             Type::Int => write!(f, "i64"),
+            Type::String => write!(f, "String"),
             Type::Sort(s) => write!(f, "{s}"),
         }
     }
@@ -82,6 +91,7 @@ impl Value {
         if match self {
             Value::Unit => matches!(t, Type::Unit),
             Value::Int(_) => matches!(t, Type::Int),
+            Value::String(_) => matches!(t, Type::String),
             Value::Sort(_) => matches!(t, Type::Sort(_)),
         } {
             Ok(())
@@ -122,7 +132,7 @@ impl Expr {
             Ok(funcs.get(f).map(|func| {
                 func.rows_with_inputs(&xs)
                     .next()
-                    .map(|row| row[row.len() - 1])
+                    .map(|row| row[row.len() - 1].clone())
             }))
         })
     }
@@ -142,8 +152,9 @@ impl Expr {
         match self {
             Expr::Unit => Ok(Some(Value::Unit)),
             Expr::Int(i) => Ok(Some(Value::Int(*i))),
+            Expr::String(s) => Ok(Some(Value::String(s.clone()))),
             Expr::Var(s) => match vars.get(s.as_str()) {
-                Some(v) => Ok(Some(*v)),
+                Some(v) => Ok(Some(v.clone())),
                 None => Err(format!("unknown variable {self}")),
             },
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {

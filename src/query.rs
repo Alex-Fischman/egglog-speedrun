@@ -246,11 +246,11 @@ fn deps_from_expr(
     deps: &mut HashSet<usize>,
 ) {
     match expr {
-        Expr::Var(var) if names.contains_key(var) => {
+        Expr::Var(var) => {
             deps.insert(names[var]);
         }
         Expr::Call(_, xs) => xs.iter().for_each(|x| deps_from_expr(x, names, deps)),
-        Expr::Unit | Expr::Int(_) | Expr::Var(_) => {}
+        _ => {}
     }
 }
 
@@ -292,7 +292,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
     fn values_to_vars(&self, values: &Values) -> Vars<'a> {
         values
             .iter()
-            .filter_map(|(class, value)| self.names.get(class).map(|name| (*name, *value)))
+            .filter_map(|(class, value)| self.names.get(class).map(|name| (*name, value.clone())))
             .collect()
     }
 
@@ -307,8 +307,8 @@ impl<'a, 'b> Bindings<'a, 'b> {
         };
 
         if let Some(result) = self.trie[height].peek() {
-            for (&class, &value) in result.as_ref()? {
-                values.insert(class, value);
+            for (&class, value) in result.as_ref()? {
+                values.insert(class, value.clone());
             }
             Ok(Some(values))
         } else if let Some(vs) = self.advance(height)? {
@@ -361,7 +361,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
             Instruction::Row { table, classes } => {
                 let xs: Vec<Value> = classes[..classes.len() - 1]
                     .iter()
-                    .filter_map(|c| values.get(c).copied())
+                    .filter_map(|c| values.get(c).cloned())
                     .collect();
 
                 let rows: Box<dyn Iterator<Item = _>> = if xs.len() + 1 == classes.len() {
@@ -370,7 +370,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 } else if let Some((col, val)) = classes
                     .iter()
                     .enumerate()
-                    .find_map(|(i, c)| values.get(c).map(|v| (i, *v)))
+                    .find_map(|(i, c)| values.get(c).map(|v| (i, v)))
                 {
                     // We can use a column index.
                     Box::new(self.funcs[table].rows_with_value_in_column(val, col))
@@ -383,9 +383,9 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 Box::new(
                     rows.map(move |row| {
                         Ok(classes
-                            .clone()
-                            .into_iter()
-                            .zip(row.iter().copied())
+                            .iter()
+                            .zip(row)
+                            .map(|(a, b)| (*a, b.clone()))
                             .collect())
                     })
                     .filter_map(move |result: Result<Values, String>| match result {
@@ -396,7 +396,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                                 if let Some(v) = values.get(class) {
                                     v == value
                                 } else {
-                                    values.insert(*class, *value);
+                                    values.insert(*class, value.clone());
                                     true
                                 }
                             }) {

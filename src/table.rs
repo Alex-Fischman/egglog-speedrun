@@ -56,8 +56,8 @@ impl Table {
     fn append_row(&mut self, row: Vec<Value>) {
         let id = self.primary.len();
         self.function.insert(row[..row.len() - 1].to_vec(), id);
-        for (column, &x) in self.columns.iter_mut().zip(&row) {
-            column.entry(x).or_default().insert(id);
+        for (column, x) in self.columns.iter_mut().zip(&row) {
+            column.entry(x.clone()).or_default().insert(id);
         }
         self.primary.push((row, true));
     }
@@ -92,11 +92,11 @@ impl Table {
             let new = &mut row[self.schema.len() - 1];
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
-                    &HashMap::from([("old", *old), ("new", *new)]),
+                    &HashMap::from([("old", old.clone()), ("new", new.clone())]),
                     &mut HashMap::new(),
                     sorts,
                 )?,
-                None if old == new => *new,
+                None if old == new => new.clone(),
                 None => return Err(format!("{old} != {new} in {}", self.name)),
             };
             if old == new {
@@ -113,10 +113,10 @@ impl Table {
     /// output type is a sort, create a new sort element, add it to the table, and return it.
     pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
         Ok(if let Some(&id) = self.function.get(&xs) {
-            Some(self.primary[id].0[self.schema.len() - 1])
+            Some(self.primary[id].0[self.schema.len() - 1].clone())
         } else if let Type::Sort(sort) = &self.schema[self.schema.len() - 1] {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
-            xs.push(y);
+            xs.push(y.clone());
             self.insert(xs, sorts)?;
             Some(y)
         } else {
@@ -148,8 +148,8 @@ impl Table {
                             // Either do congruence closure or re-append the updated row.
                             row[column] = Value::Sort(new);
                             if let Some(&id_b) = self.function.get(&row[..row.len() - 1]) {
-                                let (Value::Sort(a), Value::Sort(b)) =
-                                    (row[row.len() - 1], self.primary[id_b].0[row.len() - 1])
+                                let (&Value::Sort(a), &Value::Sort(b)) =
+                                    (&row[row.len() - 1], &self.primary[id_b].0[row.len() - 1])
                                 else {
                                     unreachable!("we check types on insertion")
                                 };
@@ -185,11 +185,11 @@ impl Table {
     /// Get all of the rows that have a specific value in a specific column.
     pub fn rows_with_value_in_column(
         &self,
-        value: Value,
+        value: &Value,
         column: usize,
     ) -> impl Iterator<Item = &[Value]> {
         self.columns[column]
-            .get(&value)
+            .get(value)
             .into_iter()
             .flat_map(|set| set.iter().map(|&id| self.primary[id].0.as_slice()))
     }

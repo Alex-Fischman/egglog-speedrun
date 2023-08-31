@@ -480,6 +480,7 @@ impl Expr {
         match self {
             Expr::Unit => Ok(Type::Unit),
             Expr::Int(_) => Ok(Type::Int),
+            Expr::String(_) => Ok(Type::String),
             Expr::Var(_) => Err(format!("unknown type for {self}")),
             Expr::Call(f, _) => match f.as_str() {
                 "+" | "min" => Ok(Type::Int),
