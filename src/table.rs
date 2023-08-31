@@ -11,7 +11,7 @@ pub struct Table {
     /// The merge function for this table. `None` means "default".
     merge: Option<Expr>,
     /// The data in this table indexed by `RowId`s.
-    primary: Vec<(Vec<Value>, bool)>,
+    primary: Vec<Vec<Value>>,
     /// The rows in this table indexed by all of the input columns.
     function: HashMap<Vec<Value>, RowId>,
     /// The rows in this table indexed by the values in each column.
@@ -59,13 +59,12 @@ impl Table {
         for (column, x) in self.columns.iter_mut().zip(&row) {
             column.entry(x.clone()).or_default().insert(id);
         }
-        self.primary.push((row, true));
+        self.primary.push(row);
     }
 
     /// Removes a row from the table by marking it as dead.
     fn remove_row(&mut self, id: RowId) {
-        let (row, live) = &mut self.primary[id];
-        *live = false;
+        let row = &self.primary[id];
         self.function.remove(&row[..row.len() - 1]);
         for (column, x) in self.columns.iter_mut().zip(row) {
             column.get_mut(x).unwrap().remove(&id);
@@ -88,7 +87,7 @@ impl Table {
         }
 
         if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
-            let old = &self.primary[id].0[self.schema.len() - 1];
+            let old = &self.primary[id][self.schema.len() - 1];
             let new = &mut row[self.schema.len() - 1];
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
@@ -113,7 +112,7 @@ impl Table {
     /// output type is a sort, create a new sort element, add it to the table, and return it.
     pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
         Ok(if let Some(&id) = self.function.get(&xs) {
-            Some(self.primary[id].0[self.schema.len() - 1].clone())
+            Some(self.primary[id][self.schema.len() - 1].clone())
         } else if let Type::Sort(sort) = &self.schema[self.schema.len() - 1] {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
             xs.push(y.clone());
@@ -135,7 +134,7 @@ impl Table {
                 for (column, t) in self.schema.clone().into_iter().enumerate() {
                     if let Type::Sort(s) = t {
                         let uf = sorts.get_mut(&s).unwrap();
-                        let mut row = self.primary[id_a].0.clone();
+                        let mut row = self.primary[id_a].clone();
                         let Value::Sort(old) = row[column] else {
                             unreachable!("we check types on insertion")
                         };
@@ -149,7 +148,7 @@ impl Table {
                             row[column] = Value::Sort(new);
                             if let Some(&id_b) = self.function.get(&row[..row.len() - 1]) {
                                 let (&Value::Sort(a), &Value::Sort(b)) =
-                                    (&row[row.len() - 1], &self.primary[id_b].0[row.len() - 1])
+                                    (&row[row.len() - 1], &self.primary[id_b][row.len() - 1])
                                 else {
                                     unreachable!("we check types on insertion")
                                 };
@@ -170,7 +169,7 @@ impl Table {
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
         self.function
             .values()
-            .map(|&id| self.primary[id].0.as_slice())
+            .map(|&id| self.primary[id].as_slice())
     }
 
     /// Get the (at most) one row in this table with the specific inputs in the input columns.
@@ -179,7 +178,7 @@ impl Table {
         self.function
             .get(xs)
             .into_iter()
-            .map(|&id| self.primary[id].0.as_slice())
+            .map(|&id| self.primary[id].as_slice())
     }
 
     /// Get all of the rows that have a specific value in a specific column.
@@ -191,6 +190,6 @@ impl Table {
         self.columns[column]
             .get(value)
             .into_iter()
-            .flat_map(|set| set.iter().map(|&id| self.primary[id].0.as_slice()))
+            .flat_map(|set| set.iter().map(|&id| self.primary[id].as_slice()))
     }
 }
