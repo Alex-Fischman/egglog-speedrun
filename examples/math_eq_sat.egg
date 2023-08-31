@@ -13,4 +13,4 @@
 (rewrite (Mul (Num a) (Num b)) (Num (* a b)))
 
 (run)
-(check (= expr1 expr2))
+(check (= (expr1) (expr2)))
