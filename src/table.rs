@@ -118,8 +118,8 @@ impl Table {
     /// output type is a sort, create a new sort element, add it to the table, and return it.
     pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
         Ok(if let Some(&id) = self.function.get(&xs) {
-            Some(self.primary[id][self.schema.len() - 1].clone())
-        } else if let Type::Sort(sort) = &self.schema[self.schema.len() - 1] {
+            Some(self.primary[id].last().unwrap().clone())
+        } else if let Type::Sort(sort) = &self.schema.last().unwrap() {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
             xs.push(y.clone());
             self.insert(xs, sorts)?;

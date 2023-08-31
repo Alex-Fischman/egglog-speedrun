@@ -133,7 +133,7 @@ impl Expr {
             Ok(funcs.get(f).map(|func| {
                 func.rows_with_inputs(&xs)
                     .next()
-                    .map(|row| row[row.len() - 1].clone())
+                    .map(|row| row.last().unwrap().clone())
             }))
         })
     }
