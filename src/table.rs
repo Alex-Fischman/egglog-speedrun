@@ -129,36 +129,22 @@ impl Table {
         let mut changed = true;
         while changed {
             changed = false;
+            // For each row, add its canonicalized version to the table.
             let ids: Vec<_> = self.function.values().copied().collect();
-            for id_a in ids {
-                for (column, t) in self.schema.clone().into_iter().enumerate() {
-                    if let Type::Sort(s) = t {
-                        let uf = sorts.get_mut(&s).unwrap();
-                        let mut row = self.primary[id_a].clone();
-                        let Value::Sort(old) = row[column] else {
-                            unreachable!("we check types on insertion")
-                        };
-                        let new = uf.find(old);
-                        if old != new {
-                            // Remove the bad row.
-                            changed = true;
-                            self.remove_row(id_a);
-
-                            // Either do congruence closure or re-append the updated row.
-                            row[column] = Value::Sort(new);
-                            if let Some(&id_b) = self.function.get(&row[..row.len() - 1]) {
-                                let (&Value::Sort(a), &Value::Sort(b)) =
-                                    (&row[row.len() - 1], &self.primary[id_b][row.len() - 1])
-                                else {
-                                    unreachable!("we check types on insertion")
-                                };
-                                uf.union(a, b)?;
-                            } else {
-                                self.append_row(row);
+            for id in ids {
+                changed |= self.insert(
+                    self.primary[id]
+                        .iter()
+                        .zip(&self.schema)
+                        .map(|(v, t)| match (v, t) {
+                            (Value::Sort(v), Type::Sort(s)) => {
+                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
                             }
-                        }
-                    }
-                }
+                            _ => v.clone(),
+                        })
+                        .collect(),
+                    sorts,
+                )?;
             }
             ever_changed |= changed;
         }
