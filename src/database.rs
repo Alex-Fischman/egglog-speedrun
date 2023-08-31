@@ -86,16 +86,12 @@ impl<'a> Database<'a> {
                 let bindings: Vec<Vars> = query.run(&self.funcs)?.collect::<Result<_, _>>()?;
                 for vars in bindings {
                     for action in actions {
-                        if run_action(action, &vars, &mut self.funcs, &mut self.sorts)? {
-                            changed = true;
-                        }
+                        changed |= run_action(action, &vars, &mut self.funcs, &mut self.sorts)?;
                     }
                 }
             }
             for table in self.funcs.values_mut() {
-                if table.rebuild(&mut self.sorts)? {
-                    changed = true;
-                }
+                changed |= table.rebuild(&mut self.sorts)?;
             }
         }
         Ok(())
@@ -123,17 +119,16 @@ fn run_action(
                 .chain([y])
                 .map(|x| x.evaluate_mut(vars, funcs, sorts))
                 .collect::<Result<Vec<_>, _>>()?;
-            let changed = funcs
+            funcs
                 .get_mut(f.as_str())
                 .ok_or(format!("unknown function {f}"))?
-                .insert(row, sorts)?;
-            Ok(changed)
+                .insert(row, sorts)
         }
-        Action::Union(x, y, sort) => match (
+        Action::Union(x, y, s) => match (
             x.evaluate_mut(vars, funcs, sorts)?,
             y.evaluate_mut(vars, funcs, sorts)?,
         ) {
-            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(sort).unwrap().union(x, y),
+            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y),
             (_, _) => unreachable!(),
         },
     }

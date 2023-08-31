@@ -164,7 +164,7 @@ impl Expr {
                     Some(i) => Ok(Some(Value::Int(i))),
                     None => Ok(None),
                 },
-                ("*", _) => match ints(xs)?.into_iter().try_fold(0, |a, b| Some(a * b?)) {
+                ("*", _) => match ints(xs)?.into_iter().try_fold(1, |a, b| Some(a * b?)) {
                     Some(i) => Ok(Some(Value::Int(i))),
                     None => Ok(None),
                 },

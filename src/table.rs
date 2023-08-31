@@ -130,31 +130,29 @@ impl Table {
     }
 
     /// Rebuild the indices so that each `Value::Sort` holds a canonical key.
+    /// Does not run to fixpoint, even if rebuilding changes `sorts`.
     pub fn rebuild(&mut self, sorts: &mut Sorts) -> Result<bool, String> {
-        let mut ever_changed = false;
-        let mut changed = true;
-        while changed {
-            changed = false;
-            // For each row, add its canonicalized version to the table.
-            let ids: Vec<_> = self.function.values().copied().collect();
-            for id in ids {
-                changed |= self.insert(
-                    self.primary[id]
-                        .iter()
-                        .zip(&self.schema)
-                        .map(|(v, t)| match (v, t) {
-                            (Value::Sort(v), Type::Sort(s)) => {
-                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
-                            }
-                            _ => v.clone(),
-                        })
-                        .collect(),
-                    sorts,
-                )?;
+        let mut changed = false;
+        // For each row, replace it with its canonicalized version.
+        let ids: Vec<_> = self.function.values().copied().collect();
+        for id in ids {
+            let row = self.primary[id]
+                .iter()
+                .zip(&self.schema)
+                .map(|(v, t)| match (v, t) {
+                    (Value::Sort(v), Type::Sort(s)) => {
+                        Value::Sort(sorts.get_mut(s).unwrap().find(*v))
+                    }
+                    _ => v.clone(),
+                })
+                .collect();
+            if row != self.primary[id] {
+                changed = true;
+                self.remove_row(id);
+                self.insert(row, sorts)?;
             }
-            ever_changed |= changed;
         }
-        Ok(ever_changed)
+        Ok(changed)
     }
 
     /// Get all of the live rows in this table.
