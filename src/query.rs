@@ -133,7 +133,7 @@ impl Query<'_> {
         // Call indices that haven't been calculated yet.
         let mut calls: HashSet<(usize, usize)> = self.call_deps.keys().copied().collect();
 
-        while known.len() < self.classes.len() {
+        while !exprs.is_empty() || !calls.is_empty() {
             // Get all indices that have known dependencies.
             let mut calculable_exprs: Vec<_> = exprs
                 .iter()
