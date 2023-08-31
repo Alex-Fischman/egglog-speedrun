@@ -416,42 +416,51 @@ impl<'a> Sexp<'a> {
 }
 
 /// Parse a source string into an `egglog` program.
+#[allow(clippy::range_plus_one)]
 pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
     // split source text into slices
     let mut slices: Vec<(Slice, bool)> = Vec::new();
     let mut in_line_comment = false;
+    let mut in_string = false;
+    let mut in_escape = false;
     for (i, c) in source.text.char_indices() {
-        if in_line_comment {
-            if c == '\n' {
-                in_line_comment = false;
+        let slice = Slice {
+            source,
+            range: i..i + 1,
+        };
+        match c {
+            c if in_string => {
+                slices.last_mut().unwrap().0.range.end += 1;
+                if in_escape {
+                    in_escape = false;
+                } else if c == '\\' {
+                    in_escape = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
             }
-        } else {
-            match c {
-                ';' => in_line_comment = true,
-                '(' | ')' => slices.push((
-                    #[allow(clippy::range_plus_one)]
-                    Slice {
-                        source,
-                        range: i..i + 1,
-                    },
-                    false,
-                )),
-                c if c.is_whitespace() => {}
-                _ => match slices.last_mut() {
-                    Some((slice, is_atom)) if *is_atom && slice.range.end == i => {
-                        slice.range.end += 1;
-                    }
-                    _ => slices.push((
-                        #[allow(clippy::range_plus_one)]
-                        Slice {
-                            source,
-                            range: i..i + 1,
-                        },
-                        true,
-                    )),
-                },
+
+            '\n' if in_line_comment => in_line_comment = false,
+            _ if in_line_comment => {}
+            ';' => in_line_comment = true,
+
+            '"' => {
+                in_string = true;
+                slices.push((slice, false));
             }
+            '(' | ')' => slices.push((slice, false)),
+            c if c.is_whitespace() => {}
+            _ => match slices.last_mut() {
+                Some((slice, is_atom)) if *is_atom && slice.range.end == i => {
+                    slice.range.end += 1;
+                }
+                _ => slices.push((slice, true)),
+            },
         }
+    }
+
+    if in_string {
+        return Err(format!("unclosed string {}", slices.last_mut().unwrap().0));
     }
 
     // parse slice stream into sexps
