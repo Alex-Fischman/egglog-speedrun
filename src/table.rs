@@ -87,8 +87,8 @@ impl Table {
         }
 
         if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
-            let old = &self.primary[id][self.schema.len() - 1];
-            let new = &mut row[self.schema.len() - 1];
+            let old = self.primary[id].last().unwrap();
+            let new = row.last_mut().unwrap();
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
                     &HashMap::from([("old", old.clone()), ("new", new.clone())]),
@@ -96,7 +96,13 @@ impl Table {
                     sorts,
                 )?,
                 None if old == new => new.clone(),
-                None => return Err(format!("{old} != {new} in {}", self.name)),
+                None => match (old.clone(), new.clone(), self.schema.last().unwrap()) {
+                    (Value::Sort(old), Value::Sort(new), Type::Sort(s)) => {
+                        sorts.get_mut(s).unwrap().union(old, new)?;
+                        Value::Sort(sorts.get_mut(s).unwrap().find(old))
+                    }
+                    _ => return Err(format!("{old} != {new} in {}", self.name)),
+                },
             };
             if old == new {
                 return Ok(false);
