@@ -393,6 +393,24 @@ impl<'a> Sexp<'a> {
                         }
                         _ => Err(format!("expeted `rule` command, found {slice}")),
                     },
+                    "rewrite" => match list.as_slice() {
+                        [_, a, b] => {
+                            // This is slightly hacky, but we use a variable name with
+                            // a space in it to make sure there are never any conflicts.
+                            let x = Expr::Var(String::from("- -"));
+                            let (a, b) = (a.to_expr()?, b.to_expr()?);
+                            let s = match (a.get_type(funcs)?, b.get_type(funcs)?) {
+                                (Type::Sort(sx), Type::Sort(sy)) if sx == sy => sx,
+                                _ => return Err(format!("expected matching sorts, found {slice}")),
+                            };
+                            Ok(vec![Command::Rule(
+                                slice,
+                                vec![Pattern(vec![a, x.clone()])],
+                                vec![Action::Union(b, x, s)],
+                            )])
+                        }
+                        _ => Err(format!("expeted `rewrite` command, found {slice}")),
+                    },
                     "run" => match list.as_slice() {
                         [_] => Ok(vec![Command::Run(slice)]),
                         _ => Err(format!("expeted `run` command, found {slice}")),
