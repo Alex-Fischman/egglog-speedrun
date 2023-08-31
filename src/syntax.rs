@@ -203,6 +203,8 @@ impl<'a> Sexp<'a> {
             Sexp::Atom(slice) => {
                 if let Ok(i) = slice.as_str().parse::<i64>() {
                     Ok(Expr::Int(i))
+                } else if let Some(s) = parse_to_string(slice)? {
+                    Ok(Expr::String(s))
                 } else {
                     Ok(Expr::Var(slice.as_str().to_owned()))
                 }
@@ -215,6 +217,7 @@ impl<'a> Sexp<'a> {
             Sexp::List(_, list) if list.is_empty() => Ok(Type::Unit),
             Sexp::List(slice, _) => Err(format!("expected type, found {slice}")),
             Sexp::Atom(slice) if slice.as_str() == "i64" => Ok(Type::Int),
+            Sexp::Atom(slice) if slice.as_str() == "String" => Ok(Type::String),
             Sexp::Atom(slice) => Ok(Type::Sort(slice.as_str().to_owned())),
         }
     }
@@ -497,4 +500,30 @@ impl Expr {
             },
         }
     }
+}
+
+fn parse_to_string(slice: &Slice) -> Result<Option<String>, String> {
+    let mut chars = slice.as_str().chars();
+    if chars.next().unwrap() != '"' {
+        return Ok(None);
+    }
+    if chars.next_back().unwrap() != '"' {
+        return Err(format!("missing end quote in {slice}"));
+    }
+    let mut string = String::new();
+    let mut in_escape = false;
+    for c in chars {
+        match c {
+            '\\' if in_escape => string.push('\\'),
+            '"' if in_escape => string.push('"'),
+            't' if in_escape => string.push('\t'),
+            'n' if in_escape => string.push('\n'),
+            c if in_escape => return Err(format!("unknown escape code \\{c} in {slice}")),
+
+            '\\' => in_escape = true,
+            '"' => panic!("unexpected quote in {slice}"),
+            c => string.push(c),
+        }
+    }
+    Ok(Some(string))
 }
