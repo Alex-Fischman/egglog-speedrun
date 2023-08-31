@@ -139,6 +139,7 @@ impl Expr {
     }
 
     /// A combined backend for both versions of evaluate, to avoid implementing it twice.
+    // If you add builtin functions, also change Expr::get_type in syntax.rs
     fn evaluate_private(
         &self,
         vars: &Vars,
@@ -160,6 +161,10 @@ impl Expr {
             },
             Expr::Call(f, xs) => match (f.as_str(), xs.as_slice()) {
                 ("+", _) => match ints(xs)?.into_iter().try_fold(0, |a, b| Some(a + b?)) {
+                    Some(i) => Ok(Some(Value::Int(i))),
+                    None => Ok(None),
+                },
+                ("*", _) => match ints(xs)?.into_iter().try_fold(0, |a, b| Some(a * b?)) {
                     Some(i) => Ok(Some(Value::Int(i))),
                     None => Ok(None),
                 },

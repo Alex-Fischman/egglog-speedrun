@@ -513,7 +513,7 @@ impl Expr {
             Expr::String(_) => Ok(Type::String),
             Expr::Var(_) => Err(format!("unknown type for {self}")),
             Expr::Call(f, _) => match f.as_str() {
-                "+" | "min" => Ok(Type::Int),
+                "+" | "*" | "min" => Ok(Type::Int),
                 _ => Ok(funcs.get(f).ok_or(format!("unknown function {f}"))?.clone()),
             },
         }
