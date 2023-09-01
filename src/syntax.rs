@@ -397,7 +397,7 @@ impl<'a> Sexp<'a> {
                         [_, a, b] => {
                             // This is slightly hacky, but we use a variable name with
                             // a space in it to make sure there are never any conflicts.
-                            let x = Expr::Var(String::from("- -"));
+                            let x = Expr::Var(String::from(" _"));
                             let (a, b) = (a.to_expr()?, b.to_expr()?);
                             let s = match (a.get_type(funcs)?, b.get_type(funcs)?) {
                                 (Type::Sort(sx), Type::Sort(sy)) if sx == sy => sx,
