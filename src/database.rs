@@ -79,22 +79,19 @@ impl<'a> Database<'a> {
 
     /// Run the rules in this `Database` to fixpoint.
     pub fn run(&mut self) -> Result<(), String> {
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for (query, actions) in &self.rules {
-                let bindings: Vec<Vars> = query.run(&self.funcs)?.collect::<Result<_, _>>()?;
+        fixpoint(self, |db| {
+            let mut changed = false;
+            for (query, actions) in &db.rules {
+                let bindings: Vec<Vars> = query.run(&db.funcs)?.collect::<Result<_, _>>()?;
                 for vars in bindings {
                     for action in actions {
-                        changed |= run_action(action, &vars, &mut self.funcs, &mut self.sorts)?;
+                        changed |= run_action(action, &vars, &mut db.funcs, &mut db.sorts)?;
                     }
                 }
             }
-            for table in self.funcs.values_mut() {
-                changed |= table.rebuild(&mut self.sorts)?;
-            }
-        }
-        Ok(())
+            Ok(changed)
+        })
+        .map(|_| ())
     }
 
     /// Get the names of the functions in this database.
@@ -112,7 +109,8 @@ fn run_action(
     funcs: &mut Funcs,
     sorts: &mut Sorts,
 ) -> Result<bool, String> {
-    match action {
+    // Run the action
+    let mut changed = match action {
         Action::Insert(_, f, xs, y) => {
             let row = xs
                 .iter()
@@ -131,5 +129,26 @@ fn run_action(
             (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y),
             (_, _) => unreachable!(),
         },
+    }?;
+    // Rebuild the database
+    changed |= fixpoint(&mut (funcs, sorts), |(funcs, sorts)| {
+        let mut changed = false;
+        for table in funcs.values_mut() {
+            changed |= table.rebuild(sorts)?;
+        }
+        Ok(changed)
+    })?;
+    Ok(changed)
+}
+
+fn fixpoint<X, F: Fn(&mut X) -> Result<bool, String>>(x: &mut X, f: F) -> Result<bool, String> {
+    let mut changed = f(x)?;
+    if changed {
+        while changed {
+            changed = f(x)?;
+        }
+        Ok(true)
+    } else {
+        Ok(false)
     }
 }
