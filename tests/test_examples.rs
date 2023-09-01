@@ -25,26 +25,26 @@ fn test_examples() {
             _ => panic!("unexpected file {}", path.display()),
         })
     {
-        let mut output = std::process::Command::new(EGGLOG)
+        let output = std::process::Command::new(EGGLOG)
             .arg(&example)
             .output()
             .expect("could not run egglog");
-        let mut actual = output.stdout;
-        actual.append(&mut output.stderr);
-        let actual = String::from_utf8(actual).unwrap();
 
-        let mut expected = example.clone();
-        assert!(expected.set_extension("out"));
-        let expected = std::fs::read_to_string(&expected)
-            .unwrap_or_else(|_| panic!("could not read {}", expected.display()));
-
-        if actual != expected {
+        if !output.stdout.is_empty() || !output.stderr.is_empty() {
             errors += 1;
-            eprintln!("failure when running {}", example.display());
-            eprintln!("expected:\n{expected}");
-            eprintln!("actual:\n{actual}");
+            eprintln!("when running {}", example.display());
+            if !output.stdout.is_empty() {
+                eprintln!("{}", String::from_utf8(output.stdout).unwrap());
+            }
+            if !output.stderr.is_empty() {
+                eprintln!("{}", String::from_utf8(output.stderr).unwrap());
+            }
         }
     }
 
-    assert_eq!(0, errors);
+    match errors {
+        0 => {}
+        1 => panic!("1 error"),
+        e => panic!("{e} errors"),
+    }
 }

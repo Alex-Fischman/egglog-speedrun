@@ -1,1 +1,0 @@
-success: (check (= (path 1 3) 20)) at examples/path_length.egg:12:1

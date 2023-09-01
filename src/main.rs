@@ -54,12 +54,9 @@ fn run() -> Result<(), String> {
             Command::Run(_) => database.run()?,
             Command::Check(slice, patterns) => {
                 let string = format!("{slice}");
-                if database.check(&Query::new(slice, &database.funcs(), patterns)?)? {
-                    print!("success: ");
-                } else {
-                    print!("failure: ");
+                if !database.check(&Query::new(slice, &database.funcs(), patterns)?)? {
+                    println!("failure: {string}");
                 }
-                println!("{string}");
             }
         }
     }
