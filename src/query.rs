@@ -124,84 +124,34 @@ impl Query<'_> {
 
     /// Run this `Query` on the tables in the `Database`.
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
-        // The ordering of instructions to build the trie.
         let mut instructions = Vec::new();
-        // The classes that the current value of `instructions` computes.
-        let mut known: HashSet<usize> = HashSet::new();
-        // `Expr` indices that haven't been calculated yet.
-        let mut exprs: HashSet<(usize, usize)> = self.expr_deps.keys().copied().collect();
-        // Call indices that haven't been calculated yet.
-        let mut calls: HashSet<(usize, usize)> = self.call_deps.keys().copied().collect();
-
-        while !exprs.is_empty() || !calls.is_empty() {
-            // Get all indices that have known dependencies.
-            let mut calculable_exprs: Vec<_> = exprs
-                .iter()
-                .copied()
-                .filter(|expr| self.expr_deps[expr].is_subset(&known))
-                .collect();
-            let mut calculable_calls: Vec<_> = calls
-                .iter()
-                .copied()
-                .filter(|call| self.call_deps[call].is_subset(&known))
-                .collect();
-
-            // We should do some work every iteration.
-            if calculable_exprs.is_empty() && calculable_calls.is_empty() {
-                // We can still evaluate calls without all of their arguments using enumeration.
-                if let Some(&call) = calls.iter().max_by_key(|&(i, j)| {
-                    let (f, xs) = &self.classes[i].calls[*j];
-                    (
-                        std::cmp::Reverse(xs.iter().filter(|c| known.contains(c)).count()),
-                        funcs[f].len(),
-                    )
-                }) {
-                    calculable_calls.push(call);
-                } else {
-                    // If nothing was calculable, there's a cycle.
-                    return Err(format!("dependency cycle in {}", self.slice));
-                }
+        instructions.extend(self.expr_deps.iter().map(|(&(class, expr), deps)| {
+            Instruction::Expr {
+                expr: &self.classes[&class].exprs[expr],
+                class,
+                deps,
             }
-
-            // We're going to calculate these now, so take them off of the list.
-            for expr in &calculable_exprs {
-                assert!(exprs.remove(expr));
+        }));
+        instructions.extend(self.call_deps.iter().map(|(&(class, call), deps)| {
+            let (table, mut classes) = self.classes[&class].calls[call].clone();
+            classes.push(class);
+            Instruction::Row {
+                table,
+                classes,
+                deps,
             }
-            for call in &calculable_calls {
-                assert!(calls.remove(call));
-            }
-
-            // Once we add these instructions these classes will all be known.
-            known.extend(calculable_exprs.iter().map(|(i, _)| i));
-            for &(i, j) in &calculable_calls {
-                known.insert(i);
-                known.extend(&self.call_deps[&(i, j)]);
-            }
-
-            // Determinism
-            calculable_exprs.sort_unstable();
-            calculable_calls.sort_unstable();
-
-            // Add instructions.
-            instructions.extend(calculable_exprs.iter().map(|&(i, j)| Instruction::Expr {
-                expr: &self.classes[&i].exprs[j],
-                class: i,
-            }));
-            instructions.extend(calculable_calls.iter().map(|&(i, j)| {
-                let (table, mut classes) = self.classes[&i].calls[j].clone();
-                classes.push(i);
-                Instruction::Row { table, classes }
-            }));
-        }
+        }));
 
         Ok(Bindings {
+            slice: &self.slice,
             names: self
                 .classes
                 .iter()
                 .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
                 .collect(),
             funcs,
-            instructions,
+            todo: instructions,
+            done: Vec::new(),
             trie: Vec::new(),
         })
     }
@@ -258,11 +208,15 @@ fn deps_from_expr(
 // There are two lifetimes because `'a` comes from the `Query` but `'b` comes from the `Database`.
 pub struct Bindings<'a, 'b> {
     /// See `Query`.
+    slice: &'a Slice<'a>,
+    /// See `Query`.
     names: HashMap<usize, &'a str>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
-    /// The `Instruction`s to generate each layer in the trie.
-    instructions: Vec<Instruction<'a>>,
+    /// Instructions to complete before we're done with the trie. Not in order.
+    todo: Vec<Instruction<'a>>,
+    /// The `Instruction`s to generate each layer in the trie. Matches the trie order.
+    done: Vec<Instruction<'a>>,
     /// A lazy trie over the bindings.
     trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
 }
@@ -277,6 +231,8 @@ enum Instruction<'a> {
         expr: &'a Expr,
         /// The class to check the expression against
         class: usize,
+        /// The set of classes that `expr` refers to
+        deps: &'a HashSet<usize>,
     },
     /// Iterate over all rows in a table
     Row {
@@ -284,6 +240,8 @@ enum Instruction<'a> {
         table: String,
         /// The classes to map the values in the columns into
         classes: Vec<usize>,
+        /// The set of classes that are inputs
+        deps: &'a HashSet<usize>,
     },
 }
 
@@ -337,79 +295,130 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
     /// Build a single layer of the trie.
     fn build(&mut self, height: usize, values: Values) {
-        match height.cmp(&self.trie.len()) {
-            // trie has been built
-            std::cmp::Ordering::Less => assert!(self.trie[height].peek().is_none()),
-            // trie is being built
-            std::cmp::Ordering::Equal => self
-                .trie
-                .push((Box::new(empty()) as Box<dyn Iterator<Item = _>>).peekable()),
-            // this should never happen
-            std::cmp::Ordering::Greater => panic!(),
+        fn rows_to_iter<'a>(
+            rows: impl Iterator<Item = &'a [Value]> + 'a,
+            classes: &[usize],
+        ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
+            let classes = classes.to_vec();
+            Box::new(rows.map(move |row| {
+                Ok(classes
+                    .iter()
+                    .zip(row)
+                    .map(|(a, b)| (*a, b.clone()))
+                    .collect())
+            }))
         }
 
-        self.trie[height] = match &self.instructions[height] {
-            Instruction::Expr { expr, class } => {
-                let x = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
-                match (x, values.get(class)) {
-                    (Err(e), _) => Box::new(once(Err(e))) as Box<dyn Iterator<Item = _>>,
-                    (Ok(None), _) => Box::new(empty()),
-                    (Ok(Some(value)), Some(v)) if *v != value => Box::new(empty()),
-                    (Ok(Some(value)), _) => Box::new(once(Ok(HashMap::from([(*class, value)])))),
+        self.todo.extend(self.done.drain(height..));
+
+        // Choose the next instruction and construct an iterator for it
+        assert!(!self.todo.is_empty());
+        let known: HashSet<usize> = values.keys().copied().collect();
+        let mut next: Option<usize> = None;
+        let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
+        // First, try to choose any instruction that can be immediately evaluated.
+        for (i, instruction) in self.todo.iter().enumerate() {
+            match instruction {
+                Instruction::Expr { expr, class, deps } if deps.is_subset(&known) => {
+                    let y = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
+                    next = Some(i);
+                    iter = Some(match y {
+                        Ok(Some(v)) => Box::new(once(Ok(HashMap::from([(*class, v)])))),
+                        Ok(None) => Box::new(empty()),
+                        Err(e) => Box::new(once(Err(e))),
+                    });
+                    break;
                 }
+                Instruction::Row {
+                    table,
+                    classes,
+                    deps,
+                } if deps.is_subset(&known) => {
+                    let xs: Vec<Value> = classes[..classes.len() - 1]
+                        .iter()
+                        .map(|class| values[class].clone())
+                        .collect();
+                    next = Some(i);
+                    iter = Some(rows_to_iter(
+                        self.funcs[table].rows_with_inputs(&xs),
+                        classes,
+                    ));
+                    break;
+                }
+                _ => {}
             }
-            Instruction::Row { table, classes } => {
-                let xs: Vec<Value> = classes[..classes.len() - 1]
-                    .iter()
-                    .filter_map(|c| values.get(c).cloned())
-                    .collect();
-
-                let rows: Box<dyn Iterator<Item = _>> = if xs.len() + 1 == classes.len() {
-                    // We can use the function index.
-                    Box::new(self.funcs[table].rows_with_inputs(&xs))
-                } else if let Some((col, val)) = classes
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, c)| values.get(c).map(|v| (i, v)))
-                {
-                    // We can use a column index.
-                    Box::new(self.funcs[table].rows_with_value_in_column(val, col))
-                } else {
-                    // We don't know any columns so we have to enumerate the whole table.
-                    Box::new(self.funcs[table].rows())
-                };
-
-                let classes = classes.clone();
-                Box::new(
-                    rows.map(move |row| {
-                        Ok(classes
-                            .iter()
-                            .zip(row)
-                            .map(|(a, b)| (*a, b.clone()))
-                            .collect())
-                    })
-                    .filter_map(move |result: Result<Values, String>| match result {
-                        Err(e) => Some(Err(e)),
-                        Ok(map) => {
-                            let mut values = values.clone();
-                            if map.iter().all(|(class, value)| {
-                                if let Some(v) = values.get(class) {
-                                    v == value
-                                } else {
-                                    values.insert(*class, value.clone());
-                                    true
-                                }
-                            }) {
-                                Some(Ok(map))
-                            } else {
-                                None
+        }
+        if next.is_none() {
+            // Second, try to choose the row instruction with the shortest column index
+            let mut shortest_column = usize::MAX;
+            for (i, instruction) in self.todo.iter().enumerate() {
+                if let Instruction::Row { table, classes, .. } = instruction {
+                    for (column, class) in classes.iter().enumerate() {
+                        if let Some(value) = values.get(class) {
+                            let column_len =
+                                self.funcs[table].len_rows_with_value_in_column(value, column);
+                            if column_len < shortest_column {
+                                shortest_column = column_len;
+                                next = Some(i);
+                                iter = Some(rows_to_iter(
+                                    self.funcs[table].rows_with_value_in_column(value, column),
+                                    classes,
+                                ));
                             }
                         }
-                    }),
-                )
+                    }
+                }
             }
         }
-        .peekable();
+        if next.is_none() {
+            // Third, try to choose the row instruction with the shortest table
+            let mut shortest_table = usize::MAX;
+            for (i, instruction) in self.todo.iter().enumerate() {
+                if let Instruction::Row { table, classes, .. } = instruction {
+                    let table_len = self.funcs[table].len_rows();
+                    if table_len < shortest_table {
+                        shortest_table = table_len;
+                        next = Some(i);
+                        iter = Some(rows_to_iter(self.funcs[table].rows(), classes));
+                    }
+                }
+            }
+        }
+        if next.is_none() {
+            // Otherwise, give up since we have a dependency cycle
+            assert!(self
+                .todo
+                .iter()
+                .all(|i| matches!(i, Instruction::Expr { .. })));
+            next = Some(0);
+            iter = Some(Box::new(once(Err(format!(
+                "dependency cycle in {}",
+                self.slice
+            )))));
+        }
+        let iter: Box<dyn Iterator<Item = _>> = Box::new(iter.unwrap().filter_map(
+            move |result: Result<Values, String>| match result {
+                Err(e) => Some(Err(e)),
+                Ok(map) => {
+                    let mut values = values.clone();
+                    if map.iter().all(|(class, value)| {
+                        if let Some(v) = values.get(class) {
+                            v == value
+                        } else {
+                            values.insert(*class, value.clone());
+                            true
+                        }
+                    }) {
+                        Some(Ok(map))
+                    } else {
+                        None
+                    }
+                }
+            },
+        ));
+
+        self.done.push(self.todo.remove(next.unwrap()));
+        self.trie[height] = iter.peekable();
     }
 }
 
@@ -418,7 +427,9 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
     fn next(&mut self) -> Option<Result<Vars<'a>, String>> {
         // fun with nesting
         match if self.trie.is_empty() {
-            for i in 0..self.instructions.len() {
+            for i in 0..self.todo.len() {
+                self.trie
+                    .push((Box::new(empty()) as Box<dyn Iterator<Item = _>>).peekable());
                 let values = if i == 0 {
                     HashMap::new()
                 } else {
@@ -430,9 +441,9 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
                 };
                 self.build(i, values);
             }
-            self.values(self.instructions.len() - 1)
+            self.values(self.trie.len() - 1)
         } else {
-            self.advance(self.instructions.len() - 1)
+            self.advance(self.trie.len() - 1)
         } {
             Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
             Ok(None) => None,

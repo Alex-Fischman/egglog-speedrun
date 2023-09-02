@@ -34,24 +34,6 @@ impl Table {
         }
     }
 
-    /// Get the number of live rows in the table.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.function.len()
-    }
-
-    /// Check if this table is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.function.is_empty()
-    }
-
-    /// Get the schema for this table.
-    #[must_use]
-    pub fn schema(&self) -> &[Type] {
-        &self.schema
-    }
-
     /// Adds a row to the table, without checking if the inputs are already present.
     fn append_row(&mut self, row: Vec<Value>) {
         let id = self.primary.len();
@@ -181,5 +163,16 @@ impl Table {
             .get(value)
             .into_iter()
             .flat_map(|set| set.iter().map(|&id| self.primary[id].as_slice()))
+    }
+
+    /// Get the number of live rows in the table.
+    #[must_use]
+    pub fn len_rows(&self) -> usize {
+        self.function.len()
+    }
+
+    /// Get the length of a column index
+    pub fn len_rows_with_value_in_column(&self, value: &Value, column: usize) -> usize {
+        self.columns[column].get(value).map_or(0, HashSet::len)
     }
 }
