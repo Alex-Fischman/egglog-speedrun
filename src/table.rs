@@ -10,15 +10,21 @@ pub struct Table {
     schema: Vec<Type>,
     /// The merge function for this table. `None` means "default".
     merge: Option<Expr>,
-    /// The data in this table indexed by `RowId`s.
-    primary: Vec<Vec<Value>>,
+    /// The data in this table, stored row-wise and indexed by `RowId`s.
+    data: Vec<Value>,
     /// The rows in this table indexed by all of the input columns.
     function: HashMap<Vec<Value>, RowId>,
     /// The rows in this table indexed by the values in each column.
     columns: Vec<HashMap<Value, HashSet<RowId>>>,
 }
 
-type RowId = usize;
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct RowId(usize);
+
+/// Returns the data in the given row.
+fn get_row<'a>(data: &'a [Value], schema: &[Type], id: RowId) -> &'a [Value] {
+    &data[id.0 * schema.len()..(id.0 + 1) * schema.len()]
+}
 
 impl Table {
     /// Create a new `Table` with the given schema.
@@ -29,24 +35,14 @@ impl Table {
             name,
             schema,
             merge,
-            primary: Vec::new(),
+            data: Vec::new(),
             function: HashMap::new(),
         }
     }
 
-    /// Adds a row to the table, without checking if the inputs are already present.
-    fn append_row(&mut self, row: Vec<Value>) {
-        let id = self.primary.len();
-        self.function.insert(row[..row.len() - 1].to_vec(), id);
-        for (column, x) in self.columns.iter_mut().zip(&row) {
-            column.entry(x.clone()).or_default().insert(id);
-        }
-        self.primary.push(row);
-    }
-
-    /// Removes a row from the table by marking it as dead.
+    /// Removes a row from all indices so it can't be referenced except by `RowId`.
     fn remove_row(&mut self, id: RowId) {
-        let row = &self.primary[id];
+        let row = get_row(&self.data, &self.schema, id);
         self.function.remove(&row[..row.len() - 1]);
         for (column, x) in self.columns.iter_mut().zip(row) {
             column.get_mut(x).unwrap().remove(&id);
@@ -68,8 +64,9 @@ impl Table {
             x.assert_type(t)?;
         }
 
+        // If there's a conflict, remove the old row
         if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
-            let old = self.primary[id].last().unwrap();
+            let old = get_row(&self.data, &self.schema, id).last().unwrap();
             let new = row.last_mut().unwrap();
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
@@ -92,7 +89,13 @@ impl Table {
             self.remove_row(id);
         }
 
-        self.append_row(row);
+        // Append the new row
+        let id = RowId(self.data.len() / self.schema.len());
+        self.function.insert(row[..row.len() - 1].to_vec(), id);
+        for (column, x) in self.columns.iter_mut().zip(&row) {
+            column.entry(x.clone()).or_default().insert(id);
+        }
+        self.data.append(&mut row);
         Ok(true)
     }
 
@@ -100,7 +103,12 @@ impl Table {
     /// output type is a sort, create a new sort element, add it to the table, and return it.
     pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
         Ok(if let Some(&id) = self.function.get(&xs) {
-            Some(self.primary[id].last().unwrap().clone())
+            Some(
+                get_row(&self.data, &self.schema, id)
+                    .last()
+                    .unwrap()
+                    .clone(),
+            )
         } else if let Type::Sort(sort) = &self.schema.last().unwrap() {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
             xs.push(y.clone());
@@ -118,7 +126,7 @@ impl Table {
         // For each row, replace it with its canonicalized version.
         let ids: Vec<_> = self.function.values().copied().collect();
         for id in ids {
-            let row = self.primary[id]
+            let row = get_row(&self.data, &self.schema, id)
                 .iter()
                 .zip(&self.schema)
                 .map(|(v, t)| match (v, t) {
@@ -128,7 +136,7 @@ impl Table {
                     _ => v.clone(),
                 })
                 .collect();
-            if row != self.primary[id] {
+            if row != get_row(&self.data, &self.schema, id) {
                 changed = true;
                 self.remove_row(id);
                 self.insert(row, sorts)?;
@@ -141,7 +149,7 @@ impl Table {
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
         self.function
             .values()
-            .map(|&id| self.primary[id].as_slice())
+            .map(|&id| get_row(&self.data, &self.schema, id))
     }
 
     /// Get the (at most) one row in this table with the specific inputs in the input columns.
@@ -150,7 +158,7 @@ impl Table {
         self.function
             .get(xs)
             .into_iter()
-            .map(|&id| self.primary[id].as_slice())
+            .map(|&id| get_row(&self.data, &self.schema, id))
     }
 
     /// Get all of the rows that have a specific value in a specific column.
@@ -162,7 +170,7 @@ impl Table {
         self.columns[column]
             .get(value)
             .into_iter()
-            .flat_map(|set| set.iter().map(|&id| self.primary[id].as_slice()))
+            .flat_map(|set| set.iter().map(|&id| get_row(&self.data, &self.schema, id)))
     }
 
     /// Get the number of live rows in the table.
