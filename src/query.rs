@@ -126,20 +126,12 @@ impl Query<'_> {
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
         let mut instructions = Vec::new();
         instructions.extend(self.expr_deps.iter().map(|(&(class, expr), deps)| {
-            Instruction::Expr {
-                expr: &self.classes[&class].exprs[expr],
-                class,
-                deps,
-            }
+            let expr = &self.classes[&class].exprs[expr];
+            Constraint::Expr { expr, class, deps }
         }));
-        instructions.extend(self.call_deps.iter().map(|(&(class, call), deps)| {
-            let (table, mut classes) = self.classes[&class].calls[call].clone();
-            classes.push(class);
-            Instruction::Row {
-                table,
-                classes,
-                deps,
-            }
+        instructions.extend(self.call_deps.iter().map(|(&(y, call), deps)| {
+            let (f, xs) = self.classes[&y].calls[call].clone();
+            Constraint::Row { f, xs, y, deps }
         }));
 
         Ok(Bindings {
@@ -214,9 +206,9 @@ pub struct Bindings<'a, 'b> {
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
     /// Instructions to complete before we're done with the trie. Not in order.
-    todo: Vec<Instruction<'a>>,
+    todo: Vec<Constraint<'a>>,
     /// The `Instruction`s to generate each layer in the trie. Matches the trie order.
-    done: Vec<Instruction<'a>>,
+    done: Vec<Constraint<'a>>,
     /// A lazy trie over the bindings.
     trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
 }
@@ -224,7 +216,7 @@ pub struct Bindings<'a, 'b> {
 type Values = HashMap<usize, Value>;
 
 /// An instruction to generate one layer of the trie.
-enum Instruction<'a> {
+enum Constraint<'a> {
     /// Compute an expression.
     Expr {
         /// The expression to evaluate
@@ -237,9 +229,11 @@ enum Instruction<'a> {
     /// Iterate over all rows in a table
     Row {
         /// The name of the table to iterate over
-        table: String,
-        /// The classes to map the values in the columns into
-        classes: Vec<usize>,
+        f: String,
+        /// The classes to map the values in the inputs columns into
+        xs: Vec<usize>,
+        /// The classes to map the value in the output column into
+        y: usize,
         /// The set of classes that are inputs
         deps: &'a HashSet<usize>,
     },
@@ -297,9 +291,11 @@ impl<'a, 'b> Bindings<'a, 'b> {
     fn build(&mut self, height: usize, values: Values) {
         fn rows_to_iter<'a>(
             rows: impl Iterator<Item = &'a [Value]> + 'a,
-            classes: &[usize],
+            xs: &[usize],
+            y: usize,
         ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
-            let classes = classes.to_vec();
+            let mut classes = xs.to_vec();
+            classes.push(y);
             Box::new(rows.map(move |row| {
                 Ok(classes
                     .iter()
@@ -319,7 +315,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
         // First, try to choose any instruction that can be immediately evaluated.
         for (i, instruction) in self.todo.iter().enumerate() {
             match instruction {
-                Instruction::Expr { expr, class, deps } if deps.is_subset(&known) => {
+                Constraint::Expr { expr, class, deps } if deps.is_subset(&known) => {
                     let y = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
                     next = Some(i);
                     iter = Some(match y {
@@ -329,20 +325,10 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     });
                     break;
                 }
-                Instruction::Row {
-                    table,
-                    classes,
-                    deps,
-                } if deps.is_subset(&known) => {
-                    let xs: Vec<Value> = classes[..classes.len() - 1]
-                        .iter()
-                        .map(|class| values[class].clone())
-                        .collect();
+                Constraint::Row { f, xs, y, deps } if deps.is_subset(&known) => {
+                    let vs: Vec<Value> = xs.iter().map(|class| values[class].clone()).collect();
                     next = Some(i);
-                    iter = Some(rows_to_iter(
-                        self.funcs[table].rows_with_inputs(&xs),
-                        classes,
-                    ));
+                    iter = Some(rows_to_iter(self.funcs[f].rows_with_inputs(&vs), xs, *y));
                     break;
                 }
                 _ => {}
@@ -352,17 +338,18 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // Second, try to choose the row instruction with the shortest column index
             let mut shortest_column = usize::MAX;
             for (i, instruction) in self.todo.iter().enumerate() {
-                if let Instruction::Row { table, classes, .. } = instruction {
-                    for (column, class) in classes.iter().enumerate() {
+                if let Constraint::Row { f, xs, y, .. } = instruction {
+                    for (column, class) in xs.iter().chain([y]).enumerate() {
                         if let Some(value) = values.get(class) {
                             let column_len =
-                                self.funcs[table].len_rows_with_value_in_column(value, column);
+                                self.funcs[f].len_rows_with_value_in_column(value, column);
                             if column_len < shortest_column {
                                 shortest_column = column_len;
                                 next = Some(i);
                                 iter = Some(rows_to_iter(
-                                    self.funcs[table].rows_with_value_in_column(value, column),
-                                    classes,
+                                    self.funcs[f].rows_with_value_in_column(value, column),
+                                    xs,
+                                    *y,
                                 ));
                             }
                         }
@@ -374,12 +361,12 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // Third, try to choose the row instruction with the shortest table
             let mut shortest_table = usize::MAX;
             for (i, instruction) in self.todo.iter().enumerate() {
-                if let Instruction::Row { table, classes, .. } = instruction {
-                    let table_len = self.funcs[table].len_rows();
+                if let Constraint::Row { f, xs, y, .. } = instruction {
+                    let table_len = self.funcs[f].len_rows();
                     if table_len < shortest_table {
                         shortest_table = table_len;
                         next = Some(i);
-                        iter = Some(rows_to_iter(self.funcs[table].rows(), classes));
+                        iter = Some(rows_to_iter(self.funcs[f].rows(), xs, *y));
                     }
                 }
             }
@@ -389,7 +376,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
             assert!(self
                 .todo
                 .iter()
-                .all(|i| matches!(i, Instruction::Expr { .. })));
+                .all(|i| matches!(i, Constraint::Expr { .. })));
             next = Some(0);
             iter = Some(Box::new(once(Err(format!(
                 "dependency cycle in {}",
