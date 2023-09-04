@@ -79,11 +79,35 @@ impl Query<'_> {
             eqs.union(a, b)?;
         }
 
-        // Change keys to canonical keys.
-        let canonicalize: HashMap<usize, usize> = eqs.keys().map(|k| (k, eqs.find(k))).collect();
+        // Do congruence closure; if two calls are the same, the classes are the same
+        let canonicalize: HashMap<_, _> = eqs.keys().map(|k| (k, eqs.find(k))).collect();
+        let mut to_union: Vec<(usize, usize)> = Vec::new();
+        for (x, a) in eqs.iter() {
+            for (y, b) in eqs.iter() {
+                if x < y
+                    && a.calls.iter().any(|(f, c)| {
+                        b.calls.iter().any(|(g, d)| {
+                            f == g && {
+                                let c: Vec<_> = c.iter().map(|c| canonicalize[c]).collect();
+                                let d: Vec<_> = d.iter().map(|d| canonicalize[d]).collect();
+                                c == d
+                            }
+                        })
+                    })
+                {
+                    to_union.push((x, y));
+                }
+            }
+        }
+        for (a, b) in to_union {
+            eqs.union(a, b)?;
+        }
+
         // We're about to do stuff with canonical keys, so don't touch `eqs` anymore.
+        let canonicalize: HashMap<_, _> = eqs.keys().map(|k| (k, eqs.find(k))).collect();
         let mut classes: HashMap<usize, EqClass> = eqs.into_iter().collect();
 
+        // Change keys to canonical keys.
         let names_to_keys: HashMap<String, usize> = names_to_keys
             .into_iter()
             .map(|(k, v)| (k, canonicalize[&v[0]]))
