@@ -145,20 +145,23 @@ impl Table {
         Ok(changed)
     }
 
+    /// Convert an iterator of ids to an iterator of rows.
+    fn ids_to_rows<'a>(
+        &'a self,
+        ids: impl Iterator<Item = &'a RowId>,
+    ) -> impl Iterator<Item = &'a [Value]> {
+        ids.map(|&id| get_row(&self.data, &self.schema, id))
+    }
+
     /// Get all of the live rows in this table.
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
-        self.function
-            .values()
-            .map(|&id| get_row(&self.data, &self.schema, id))
+        self.ids_to_rows(self.function.values())
     }
 
     /// Get the (at most) one row in this table with the specific inputs in the input columns.
     /// This method never changes `self`; notably, it will not create new sort elements.
     pub fn rows_with_inputs(&self, xs: &[Value]) -> impl Iterator<Item = &[Value]> {
-        self.function
-            .get(xs)
-            .into_iter()
-            .map(|&id| get_row(&self.data, &self.schema, id))
+        self.ids_to_rows(self.function.get(xs).into_iter())
     }
 
     /// Get all of the rows that have a specific value in a specific column.
@@ -167,10 +170,7 @@ impl Table {
         value: &Value,
         column: usize,
     ) -> impl Iterator<Item = &[Value]> {
-        self.columns[column]
-            .get(value)
-            .into_iter()
-            .flat_map(|set| set.iter().map(|&id| get_row(&self.data, &self.schema, id)))
+        self.ids_to_rows(self.columns[column].get(value).into_iter().flatten())
     }
 
     /// Get the number of live rows in the table.
