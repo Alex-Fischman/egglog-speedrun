@@ -154,7 +154,7 @@ impl Query<'_> {
             Constraint::Expr { expr, class, deps }
         }));
         instructions.extend(self.call_deps.iter().map(|(&(y, call), deps)| {
-            let (f, xs) = self.classes[&y].calls[call].clone();
+            let (f, xs) = &self.classes[&y].calls[call];
             Constraint::Row { f, xs, y, deps }
         }));
 
@@ -229,9 +229,9 @@ pub struct Bindings<'a, 'b> {
     names: HashMap<usize, &'a str>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
-    /// Instructions to complete before we're done with the trie. Not in order.
+    /// Constraints to complete before we're done with the trie. Not in order.
     todo: Vec<Constraint<'a>>,
-    /// The `Instruction`s to generate each layer in the trie. Matches the trie order.
+    /// The `Constraints`s to generate each layer in the trie. Matches the trie order.
     done: Vec<Constraint<'a>>,
     /// A lazy trie over the bindings.
     trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
@@ -253,9 +253,9 @@ enum Constraint<'a> {
     /// Iterate over all rows in a table
     Row {
         /// The name of the table to iterate over
-        f: String,
+        f: &'a str,
         /// The classes to map the values in the inputs columns into
-        xs: Vec<usize>,
+        xs: &'a [usize],
         /// The classes to map the value in the output column into
         y: usize,
         /// The set of classes that are inputs
@@ -352,7 +352,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 Constraint::Row { f, xs, y, deps } if deps.is_subset(&known) => {
                     let vs: Vec<Value> = xs.iter().map(|class| values[class].clone()).collect();
                     next = Some(i);
-                    iter = Some(rows_to_iter(self.funcs[f].rows_with_inputs(&vs), xs, *y));
+                    iter = Some(rows_to_iter(self.funcs[*f].rows_with_inputs(&vs), xs, *y));
                     break;
                 }
                 _ => {}
@@ -366,12 +366,12 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     for (column, class) in xs.iter().chain([y]).enumerate() {
                         if let Some(value) = values.get(class) {
                             let column_len =
-                                self.funcs[f].len_rows_with_value_in_column(value, column);
+                                self.funcs[*f].len_rows_with_value_in_column(value, column);
                             if column_len < shortest_column {
                                 shortest_column = column_len;
                                 next = Some(i);
                                 iter = Some(rows_to_iter(
-                                    self.funcs[f].rows_with_value_in_column(value, column),
+                                    self.funcs[*f].rows_with_value_in_column(value, column),
                                     xs,
                                     *y,
                                 ));
@@ -386,11 +386,11 @@ impl<'a, 'b> Bindings<'a, 'b> {
             let mut shortest_table = usize::MAX;
             for (i, instruction) in self.todo.iter().enumerate() {
                 if let Constraint::Row { f, xs, y, .. } = instruction {
-                    let table_len = self.funcs[f].len_rows();
+                    let table_len = self.funcs[*f].len_rows();
                     if table_len < shortest_table {
                         shortest_table = table_len;
                         next = Some(i);
-                        iter = Some(rows_to_iter(self.funcs[f].rows(), xs, *y));
+                        iter = Some(rows_to_iter(self.funcs[*f].rows(), xs, *y));
                     }
                 }
             }
