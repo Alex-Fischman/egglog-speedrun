@@ -50,7 +50,7 @@ impl Table {
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
-    /// Returns true if the table was changed.
+    /// Returns true if the either the table or `sorts` was changed.
     pub fn insert(&mut self, mut row: Vec<Value>, sorts: &mut Sorts) -> Result<bool, String> {
         if row.len() != self.schema.len() {
             return Err(format!(
@@ -68,6 +68,7 @@ impl Table {
         if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
             let old = get_row(&self.data, &self.schema, id).last().unwrap();
             let new = row.last_mut().unwrap();
+            let mut changed = false;
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
                     &HashMap::from([("old", old.clone()), ("new", new.clone())]),
@@ -77,13 +78,13 @@ impl Table {
                 None if old == new => new.clone(),
                 None => match (old.clone(), new.clone(), self.schema.last().unwrap()) {
                     (Value::Sort(old), Value::Sort(new), Type::Sort(s)) => {
-                        sorts.get_mut(s).unwrap().union(old, new)?;
+                        changed |= sorts.get_mut(s).unwrap().union(old, new)?;
                         Value::Sort(sorts.get_mut(s).unwrap().find(old))
                     }
                     _ => return Err(format!("{old} != {new} in {}", self.name)),
                 },
             };
-            if old == new {
+            if old == new && !changed {
                 return Ok(false);
             }
             self.remove_row(id);

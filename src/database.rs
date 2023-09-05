@@ -101,7 +101,7 @@ impl<'a> Database<'a> {
     }
 }
 
-/// Returns true if running the action changed `funcs`.
+/// Returns true if running the action changed `funcs` or `sorts`.
 /// Not a method on `Database` because we need to not borrow `rules`.
 fn run_action(
     action: &Action,
@@ -110,7 +110,7 @@ fn run_action(
     sorts: &mut Sorts,
 ) -> Result<bool, String> {
     // Run the action
-    let mut changed = match action {
+    let changed = match action {
         Action::Insert(_, f, xs, y) => {
             let row = xs
                 .iter()
@@ -130,15 +130,19 @@ fn run_action(
             (_, _) => unreachable!(),
         },
     }?;
-    // Rebuild the database
-    changed |= fixpoint(&mut (funcs, sorts), |(funcs, sorts)| {
-        let mut changed = false;
-        for table in funcs.values_mut() {
-            changed |= table.rebuild(sorts)?;
-        }
-        Ok(changed)
-    })?;
-    Ok(changed)
+    if changed {
+        // Rebuild the database
+        fixpoint(&mut (funcs, sorts), |(funcs, sorts)| {
+            let mut changed = false;
+            for table in funcs.values_mut() {
+                changed |= table.rebuild(sorts)?;
+            }
+            Ok(changed)
+        })?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 fn fixpoint<X, F: Fn(&mut X) -> Result<bool, String>>(x: &mut X, f: F) -> Result<bool, String> {
