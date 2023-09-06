@@ -167,7 +167,6 @@ impl Query<'_> {
                 .collect(),
             funcs,
             todo: instructions,
-            done: Vec::new(),
             trie: Vec::new(),
         })
     }
@@ -231,10 +230,14 @@ pub struct Bindings<'a, 'b> {
     funcs: &'b Funcs,
     /// Constraints to complete before we're done with the trie. Not in order.
     todo: Vec<Constraint<'a>>,
-    /// The `Constraints`s to generate each layer in the trie. Matches the trie order.
-    done: Vec<Constraint<'a>>,
-    /// A lazy trie over the bindings.
-    trie: Vec<std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>>,
+    /// A lazy trie over the bindings, represented as an ordered list of iterators.
+    /// Each iterator is bundled with the constraint used to generate it, if there is one.
+    trie: Vec<Layer<'a, 'b>>,
+}
+
+struct Layer<'a, 'b> {
+    constraint: Option<Constraint<'a>>,
+    iterator: std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>,
 }
 
 type Values = HashMap<usize, Value>;
@@ -282,7 +285,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
             return Ok(None);
         };
 
-        if let Some(result) = self.trie[height].peek() {
+        if let Some(result) = self.trie[height].iterator.peek() {
             for (&class, value) in result.as_ref()? {
                 values.insert(class, value.clone());
             }
@@ -299,7 +302,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
     /// Advance the lazy trie up to `height` to the next value.
     fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if self.trie[height].next().is_some() {
+        if self.trie[height].iterator.next().is_some() {
             self.values(height)
         } else if height == 0 {
             Ok(None)
@@ -329,19 +332,24 @@ impl<'a, 'b> Bindings<'a, 'b> {
             }))
         }
 
-        self.todo.extend(self.done.drain(height..));
+        self.todo
+            .extend(self.trie.drain(height..).filter_map(|mut l| {
+                assert!(l.iterator.peek().is_none());
+                l.constraint
+            }));
 
         // Choose the next instruction and construct an iterator for it
         assert!(!self.todo.is_empty());
         let known: HashSet<usize> = values.keys().copied().collect();
-        let mut next: Option<usize> = None;
+        // None: todo, Some(None): pass, Some(Some(i)): remove ith constraint
+        let mut next: Option<Option<usize>> = None;
         let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
         // First, try to choose any instruction that can be immediately evaluated.
         for (i, instruction) in self.todo.iter().enumerate() {
             match instruction {
                 Constraint::Expr { expr, class, deps } if deps.is_subset(&known) => {
                     let y = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
-                    next = Some(i);
+                    next = Some(Some(i));
                     iter = Some(match y {
                         Ok(Some(v)) => Box::new(once(Ok(HashMap::from([(*class, v)])))),
                         Ok(None) => Box::new(empty()),
@@ -351,7 +359,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 }
                 Constraint::Row { f, xs, y, deps } if deps.is_subset(&known) => {
                     let vs: Vec<Value> = xs.iter().map(|class| values[class].clone()).collect();
-                    next = Some(i);
+                    next = Some(Some(i));
                     iter = Some(rows_to_iter(self.funcs[*f].rows_with_inputs(&vs), xs, *y));
                     break;
                 }
@@ -366,10 +374,10 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     for (column, class) in xs.iter().chain([y]).enumerate() {
                         if let Some(value) = values.get(class) {
                             let column_len =
-                                self.funcs[*f].len_rows_with_value_in_column(value, column);
+                                self.funcs[*f].num_rows_with_value_in_column(value, column);
                             if column_len < shortest_column {
                                 shortest_column = column_len;
-                                next = Some(i);
+                                next = Some(Some(i));
                                 iter = Some(rows_to_iter(
                                     self.funcs[*f].rows_with_value_in_column(value, column),
                                     xs,
@@ -382,14 +390,53 @@ impl<'a, 'b> Bindings<'a, 'b> {
             }
         }
         if next.is_none() {
-            // Third, try to choose the row instruction with the shortest table
+            // Third, check if any classes appear in more than one row constraint.
+            // If any do, intersect the values in those columns without consuming any constraints.
+            let mut classes_to_columns: HashMap<usize, Vec<(String, _, _)>> = HashMap::new();
+            for instruction in &self.todo {
+                if let Constraint::Row { f, xs, y, .. } = instruction {
+                    for (column, class) in xs.iter().chain([y]).enumerate() {
+                        classes_to_columns.entry(*class).or_default().push((
+                            (*f).to_owned(),
+                            column,
+                            self.funcs[*f].num_values_in_column(column),
+                        ));
+                    }
+                }
+            }
+            classes_to_columns.retain(|_, columns| columns.len() >= 2);
+            classes_to_columns
+                .values_mut()
+                .for_each(|columns| columns.sort_unstable_by_key(|(_, _, len)| *len));
+            // This is the only strategy with any estimation; we don't know how many
+            // rows doing the intersection actually eliminates.
+            if let Some((class, columns)) = classes_to_columns
+                .into_iter()
+                .min_by_key(|(_, columns)| columns[0].2)
+            {
+                let funcs = self.funcs; // don't move self into the closure
+                next = Some(None);
+                iter = Some(Box::new(
+                    funcs[&columns[0].0]
+                        .values_in_column(columns[0].1)
+                        .filter(move |v| {
+                            columns[1..]
+                                .iter()
+                                .all(|(f, c, _)| funcs[f].is_value_in_column(v, *c))
+                        })
+                        .map(move |v| Ok(HashMap::from([(class, v.clone())]))),
+                ));
+            }
+        }
+        if next.is_none() {
+            // Fourth, try to choose the row instruction with the shortest table
             let mut shortest_table = usize::MAX;
             for (i, instruction) in self.todo.iter().enumerate() {
                 if let Constraint::Row { f, xs, y, .. } = instruction {
-                    let table_len = self.funcs[*f].len_rows();
+                    let table_len = self.funcs[*f].num_rows();
                     if table_len < shortest_table {
                         shortest_table = table_len;
-                        next = Some(i);
+                        next = Some(Some(i));
                         iter = Some(rows_to_iter(self.funcs[*f].rows(), xs, *y));
                     }
                 }
@@ -401,7 +448,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 .todo
                 .iter()
                 .all(|i| matches!(i, Constraint::Expr { .. })));
-            next = Some(0);
+            next = Some(None);
             iter = Some(Box::new(once(Err(format!(
                 "dependency cycle in {}",
                 self.slice
@@ -428,8 +475,10 @@ impl<'a, 'b> Bindings<'a, 'b> {
             },
         ));
 
-        self.done.push(self.todo.remove(next.unwrap()));
-        self.trie[height] = iter.peekable();
+        self.trie.push(Layer {
+            constraint: next.unwrap().map(|i| self.todo.remove(i)),
+            iterator: iter.peekable(),
+        });
     }
 }
 
@@ -438,9 +487,8 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
     fn next(&mut self) -> Option<Result<Vars<'a>, String>> {
         // fun with nesting
         match if self.trie.is_empty() {
-            for i in 0..self.todo.len() {
-                self.trie
-                    .push((Box::new(empty()) as Box<dyn Iterator<Item = _>>).peekable());
+            let mut i = 0;
+            while !self.todo.is_empty() {
                 let values = if i == 0 {
                     HashMap::new()
                 } else {
@@ -451,6 +499,7 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
                     }
                 };
                 self.build(i, values);
+                i += 1;
             }
             self.values(self.trie.len() - 1)
         } else {
