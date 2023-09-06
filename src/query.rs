@@ -148,12 +148,12 @@ impl Query<'_> {
 
     /// Run this `Query` on the tables in the `Database`.
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
-        let mut instructions = Vec::new();
-        instructions.extend(self.expr_deps.iter().map(|(&(class, expr), deps)| {
+        let mut todo = Vec::new();
+        todo.extend(self.expr_deps.iter().map(|(&(class, expr), deps)| {
             let expr = &self.classes[&class].exprs[expr];
             Constraint::Expr { expr, class, deps }
         }));
-        instructions.extend(self.call_deps.iter().map(|(&(y, call), deps)| {
+        todo.extend(self.call_deps.iter().map(|(&(y, call), deps)| {
             let (f, xs) = &self.classes[&y].calls[call];
             Constraint::Row { f, xs, y, deps }
         }));
@@ -166,7 +166,7 @@ impl Query<'_> {
                 .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
                 .collect(),
             funcs,
-            todo: instructions,
+            todo,
             trie: Vec::new(),
         })
     }
@@ -242,7 +242,7 @@ struct Layer<'a, 'b> {
 
 type Values = HashMap<usize, Value>;
 
-/// An instruction to generate one layer of the trie.
+/// A constraint that will be used to generate one layer of the trie.
 enum Constraint<'a> {
     /// Compute an expression.
     Expr {
@@ -338,15 +338,14 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 l.constraint
             }));
 
-        // Choose the next instruction and construct an iterator for it
         assert!(!self.todo.is_empty());
         let known: HashSet<usize> = values.keys().copied().collect();
         // None: todo, Some(None): pass, Some(Some(i)): remove ith constraint
         let mut next: Option<Option<usize>> = None;
         let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
-        // First, try to choose any instruction that can be immediately evaluated.
-        for (i, instruction) in self.todo.iter().enumerate() {
-            match instruction {
+        // First, try to choose any constraint that can be immediately evaluated.
+        for (i, constraint) in self.todo.iter().enumerate() {
+            match constraint {
                 Constraint::Expr { expr, class, deps } if deps.is_subset(&known) => {
                     let y = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
                     next = Some(Some(i));
@@ -367,10 +366,10 @@ impl<'a, 'b> Bindings<'a, 'b> {
             }
         }
         if next.is_none() {
-            // Second, try to choose the row instruction with the shortest column index
+            // Second, try to choose the row constraint with the shortest column index
             let mut shortest_column = usize::MAX;
-            for (i, instruction) in self.todo.iter().enumerate() {
-                if let Constraint::Row { f, xs, y, .. } = instruction {
+            for (i, constraint) in self.todo.iter().enumerate() {
+                if let Constraint::Row { f, xs, y, .. } = constraint {
                     for (column, class) in xs.iter().chain([y]).enumerate() {
                         if let Some(value) = values.get(class) {
                             let column_len =
@@ -393,8 +392,8 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // Third, check if any classes appear in more than one row constraint.
             // If any do, intersect the values in those columns without consuming any constraints.
             let mut classes_to_columns: HashMap<usize, Vec<(String, _, _)>> = HashMap::new();
-            for instruction in &self.todo {
-                if let Constraint::Row { f, xs, y, .. } = instruction {
+            for constraint in &self.todo {
+                if let Constraint::Row { f, xs, y, .. } = constraint {
                     for (column, class) in xs.iter().chain([y]).enumerate() {
                         classes_to_columns.entry(*class).or_default().push((
                             (*f).to_owned(),
@@ -429,10 +428,10 @@ impl<'a, 'b> Bindings<'a, 'b> {
             }
         }
         if next.is_none() {
-            // Fourth, try to choose the row instruction with the shortest table
+            // Fourth, try to choose the row constraint with the shortest table
             let mut shortest_table = usize::MAX;
-            for (i, instruction) in self.todo.iter().enumerate() {
-                if let Constraint::Row { f, xs, y, .. } = instruction {
+            for (i, constraint) in self.todo.iter().enumerate() {
+                if let Constraint::Row { f, xs, y, .. } = constraint {
                     let table_len = self.funcs[*f].num_rows();
                     if table_len < shortest_table {
                         shortest_table = table_len;
