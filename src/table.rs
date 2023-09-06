@@ -176,12 +176,30 @@ impl Table {
 
     /// Get the number of live rows in the table.
     #[must_use]
-    pub fn len_rows(&self) -> usize {
+    pub fn num_rows(&self) -> usize {
         self.function.len()
     }
 
-    /// Get the length of a column index
-    pub fn len_rows_with_value_in_column(&self, value: &Value, column: usize) -> usize {
+    /// Get the length of a column index for a specific value.
+    #[must_use]
+    pub fn num_rows_with_value_in_column(&self, value: &Value, column: usize) -> usize {
         self.columns[column].get(value).map_or(0, HashSet::len)
+    }
+
+    /// Get the number of possible values in a specific column.
+    #[must_use]
+    pub fn num_values_in_column(&self, column: usize) -> usize {
+        self.columns[column].len()
+    }
+
+    /// Get all of the values in a column.
+    pub fn values_in_column(&self, column: usize) -> impl Iterator<Item = &Value> {
+        self.columns[column].keys()
+    }
+
+    /// Check if a specific value ever appears in a column.
+    #[must_use]
+    pub fn is_value_in_column(&self, value: &Value, column: usize) -> bool {
+        self.columns[column].contains_key(value)
     }
 }
