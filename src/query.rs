@@ -449,7 +449,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 .all(|i| matches!(i, Constraint::Expr { .. })));
             next = Some(None);
             iter = Some(Box::new(once(Err(format!(
-                "dependency cycle in {}",
+                "query was not range-restricted in {}",
                 self.slice
             )))));
         }
