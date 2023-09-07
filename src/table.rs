@@ -13,14 +13,14 @@ pub struct Table {
     /// The data in this table, stored row-wise and indexed by `RowId`s.
     data: Vec<Value>,
     /// The indices into the data for this table. None means don't care.
-    indices: HashMap<Vec<Option<Value>>, HashSet<RowId>>,
+    indices: HashMap<Vec<Option<Value>>, BTreeSet<RowId>>,
     /// A default set to return a reference to.
-    empty: HashSet<RowId>,
-    /// The rows that have been added this iteration.
-    curr: Range<RowId>,
+    empty: BTreeSet<RowId>,
+    /// The rows that were added in the last iteration.
+    prev: Range<RowId>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct RowId(usize);
 
 /// Returns the data in the given row.
@@ -38,8 +38,8 @@ impl Table {
             merge,
             data: Vec::new(),
             indices: HashMap::new(),
-            empty: HashSet::new(),
-            curr: RowId(0)..RowId(0),
+            empty: BTreeSet::new(),
+            prev: RowId(0)..RowId(0),
         }
     }
 
@@ -55,7 +55,7 @@ impl Table {
     }
 
     /// Get all the `RowId`s corresponding to the given values.
-    fn get_ids(&self, row: &[Option<Value>]) -> &HashSet<RowId> {
+    fn get_ids(&self, row: &[Option<Value>]) -> &BTreeSet<RowId> {
         self.indices.get(row).unwrap_or(&self.empty)
     }
 
@@ -79,7 +79,7 @@ impl Table {
 
     /// This function advances the iteration pointers for semi-naive.
     pub fn iteration_start(&mut self) {
-        self.curr = self.curr.end..self.length_id();
+        self.prev = self.prev.end..self.length_id();
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
@@ -197,10 +197,25 @@ impl Table {
     }
 
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
-    pub fn rows(&self, row: &[Option<Value>]) -> impl Iterator<Item = &[Value]> {
+    pub fn rows(&self, row: &[Option<Value>], i: Iteration) -> impl Iterator<Item = &[Value]> {
         assert_eq!(self.schema.len(), row.len());
         self.get_ids(row)
-            .iter()
+            .range(match i {
+                Iteration::Past => RowId(0)..self.prev.start,
+                Iteration::Prev => self.prev.clone(),
+                Iteration::All => RowId(0)..self.length_id(),
+            })
             .map(|&id| get_row(&self.data, &self.schema, id))
     }
+}
+
+/// Which rows of the table to get when doing seminaive
+#[derive(Clone, Copy)]
+pub enum Iteration {
+    /// Only get rows from before the last iteration.
+    Past,
+    /// Only get rows that were added in the last iteration.
+    Prev,
+    /// Get all rows.
+    All,
 }
