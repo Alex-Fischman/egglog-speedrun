@@ -40,6 +40,11 @@ impl Table {
         }
     }
 
+    /// Returns a `RowId` with the total number of rows in the table (ignoring liveness).
+    fn length_id(&self) -> RowId {
+        RowId(self.data.len() / self.schema.len())
+    }
+
     /// Removes a row from all indices so it can't be referenced except by `RowId`.
     fn remove_row(&mut self, id: RowId) {
         let row = get_row(&self.data, &self.schema, id);
@@ -91,7 +96,7 @@ impl Table {
         }
 
         // Append the new row
-        let id = RowId(self.data.len() / self.schema.len());
+        let id = self.length_id();
         self.function.insert(row[..row.len() - 1].to_vec(), id);
         for (column, x) in self.columns.iter_mut().zip(&row) {
             column.entry(x.clone()).or_default().insert(id);
