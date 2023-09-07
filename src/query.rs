@@ -185,15 +185,22 @@ fn eqs_from_expr(
             name: Some(var),
             ..EqClass::default()
         }),
-        Expr::Call(f, xs) if funcs.contains(&f) => {
+        Expr::Call(ref f, ref xs) => {
             let xs = xs
-                .into_iter()
-                .map(|x| eqs_from_expr(x, funcs, eqs))
+                .iter()
+                .map(|x| eqs_from_expr(x.clone(), funcs, eqs))
                 .collect::<Result<Vec<_>, _>>()?;
-            eqs.new_key(EqClass {
-                calls: vec![(f, xs)],
-                ..EqClass::default()
-            })
+            if funcs.contains(&f) {
+                eqs.new_key(EqClass {
+                    calls: vec![(f.clone(), xs)],
+                    ..EqClass::default()
+                })
+            } else {
+                eqs.new_key(EqClass {
+                    exprs: vec![expr],
+                    ..EqClass::default()
+                })
+            }
         }
         _ => eqs.new_key(EqClass {
             exprs: vec![expr],
