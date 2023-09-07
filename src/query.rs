@@ -239,7 +239,7 @@ pub struct Bindings<'a, 'b> {
 
 struct Layer<'b> {
     constraint: Option<Constraint>,
-    iterator: std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>,
+    iterator: Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>,
 }
 
 type Values = HashMap<usize, Value>;
@@ -373,64 +373,64 @@ impl<'a, 'b> Bindings<'a, 'b> {
             }
         }
         if next.is_none() {
-            // Second, try to choose the row constraint with the shortest column index
-            let mut shortest_column = usize::MAX;
+            // Second, try to choose the row constraint with the shortest column index.
+            let mut vec = Vec::new();
             for (i, constraint) in self.todo.iter().enumerate() {
                 if let &Constraint::Row { y, index } = constraint {
                     let (f, xs) = &self.query.classes[&y].calls[index];
-                    for (column, class) in xs.iter().chain([&y]).enumerate() {
-                        if let Some(value) = values.get(class) {
-                            let column_len =
-                                self.funcs[f].num_rows_with_value_in_column(value, column);
-                            if column_len < shortest_column {
-                                shortest_column = column_len;
-                                next = Some(Some(i));
-                                iter = Some(rows_to_iter(
-                                    self.funcs[f].rows_with_value_in_column(value, column),
-                                    xs,
-                                    y,
-                                ));
-                            }
+                    for (c, class) in xs.iter().chain([&y]).enumerate() {
+                        if let Some(v) = values.get(class) {
+                            vec.push((
+                                (i, f, xs, y, v, c),
+                                self.funcs[f].rows_with_value_in_column(v, c).peekable(),
+                            ));
                         }
                     }
                 }
+            }
+            if let Some(((i, f, xs, y, v, c), _)) = pick_shortest(&mut vec) {
+                next = Some(Some(i));
+                iter = Some(rows_to_iter(
+                    self.funcs[f].rows_with_value_in_column(v, c),
+                    xs,
+                    y,
+                ));
             }
         }
         if next.is_none() {
             // Third, check if any classes appear in more than one row constraint.
             // If any do, intersect the values in those columns without consuming any constraints.
-            let mut classes_to_columns: HashMap<usize, Vec<(String, _, _)>> = HashMap::new();
+            let mut classes_to_columns: HashMap<usize, Vec<((_, _), _)>> = HashMap::new();
             for constraint in &self.todo {
                 if let &Constraint::Row { y, index } = constraint {
                     let (f, xs) = &self.query.classes[&y].calls[index];
                     for (column, class) in xs.iter().chain([&y]).enumerate() {
                         classes_to_columns.entry(*class).or_default().push((
-                            f.clone(),
-                            column,
-                            self.funcs[f].num_values_in_column(column),
+                            (f.clone(), column),
+                            self.funcs[f].values_in_column(column).peekable(),
                         ));
                     }
                 }
             }
             classes_to_columns.retain(|_, columns| columns.len() >= 2);
-            classes_to_columns
-                .values_mut()
-                .for_each(|columns| columns.sort_unstable_by_key(|(_, _, len)| *len));
             // This is the only strategy with any estimation; we don't know how many
-            // rows doing the intersection actually eliminates.
-            if let Some((class, columns)) = classes_to_columns
+            // rows doing the intersection actually eliminates. We use the minimum
+            // number of values in any column as a proxy for intersection size,
+            // which is a proxy for number of rows eliminated.
+            if let Some((class, (((f, c), _), columns))) = classes_to_columns
                 .into_iter()
-                .min_by_key(|(_, columns)| columns[0].2)
+                .map(|(k, mut v)| (k, (pick_shortest(&mut v).unwrap(), v)))
+                .min_by_key(|(_, ((_, len), _))| *len)
             {
                 let funcs = self.funcs; // don't move self into the closure
                 next = Some(None);
                 iter = Some(Box::new(
-                    funcs[&columns[0].0]
-                        .values_in_column(columns[0].1)
+                    funcs[&f]
+                        .values_in_column(c)
                         .filter(move |v| {
-                            columns[1..]
+                            columns
                                 .iter()
-                                .all(|(f, c, _)| funcs[f].is_value_in_column(v, *c))
+                                .all(|((f, c), _)| funcs[f].is_value_in_column(v, *c))
                         })
                         .map(move |v| Ok(HashMap::from([(class, v.clone())]))),
                 ));
@@ -438,17 +438,16 @@ impl<'a, 'b> Bindings<'a, 'b> {
         }
         if next.is_none() {
             // Fourth, try to choose the row constraint with the shortest table
-            let mut shortest_table = usize::MAX;
+            let mut vec = Vec::new();
             for (i, constraint) in self.todo.iter().enumerate() {
                 if let &Constraint::Row { y, index } = constraint {
                     let (f, xs) = &self.query.classes[&y].calls[index];
-                    let table_len = self.funcs[f].num_rows();
-                    if table_len < shortest_table {
-                        shortest_table = table_len;
-                        next = Some(Some(i));
-                        iter = Some(rows_to_iter(self.funcs[f].rows(), xs, y));
-                    }
+                    vec.push(((i, f, xs, y), self.funcs[f].rows().peekable()));
                 }
+            }
+            if let Some(((i, f, xs, y), _)) = pick_shortest(&mut vec) {
+                next = Some(Some(i));
+                iter = Some(rows_to_iter(self.funcs[f].rows(), xs, y));
             }
         }
         if next.is_none() {
@@ -517,6 +516,26 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
             Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
             Ok(None) => None,
             Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// Goes through the iterators and iterates each one until one of the iterators runs out.
+/// then returns the data associated with that iterator and its length. Do not rely on
+/// the state of the iterators after this function is finished.
+fn pick_shortest<T, I: Iterator>(vec: &mut Vec<(T, Peekable<I>)>) -> Option<(T, usize)> {
+    if vec.is_empty() {
+        None
+    } else {
+        let mut len = 0;
+        loop {
+            for (i, (_, iterator)) in vec.iter_mut().enumerate() {
+                if iterator.peek().is_none() {
+                    return Some((vec.remove(i).0, len));
+                }
+                iterator.next();
+            }
+            len += 1;
         }
     }
 }
