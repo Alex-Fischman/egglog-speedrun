@@ -150,25 +150,53 @@ impl Query<'_> {
     pub fn run<'a: 'c, 'b: 'c, 'c>(
         &'a self,
         funcs: &'b Funcs,
+        seminaive: bool,
     ) -> impl Iterator<Item = Result<Vars<'a>, String>> + 'c {
-        let mut todo = Vec::new();
-        todo.extend(
+        let mut constraints = Vec::new();
+        constraints.extend(
             self.expr_deps
                 .keys()
                 .map(|&(class, index)| Constraint::Expr { class, index }),
         );
-        todo.extend(
+        constraints.extend(
             self.call_deps
                 .keys()
                 .map(|&(y, index)| Constraint::Row { y, index }),
         );
 
-        Bindings {
+        let mut call_order: Vec<_> = self.call_deps.keys().copied().collect();
+        call_order.sort_unstable(); // determinism
+
+        let iterations: Box<dyn Iterator<Item = _>> = if seminaive {
+            Box::new(
+                (1..2_usize.pow(u32::try_from(call_order.len()).unwrap())).map(move |i| {
+                    call_order
+                        .iter()
+                        .enumerate()
+                        .map(|(j, call)| match (i >> j) & 1 {
+                            0 => (*call, Iteration::Past),
+                            1 => (*call, Iteration::Prev),
+                            _ => unreachable!(),
+                        })
+                        .collect()
+                }),
+            )
+        } else {
+            Box::new(once(
+                call_order
+                    .iter()
+                    .map(|call| (*call, Iteration::All))
+                    .collect(),
+            ))
+        };
+
+        iterations.flat_map(move |iteration| Bindings {
             query: self,
             funcs,
-            todo,
+            iteration,
+            todo: constraints.clone(),
             trie: Vec::new(),
-        }
+        })
     }
 }
 
@@ -233,6 +261,8 @@ pub struct Bindings<'a, 'b> {
     query: &'a Query<'a>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
+    /// Which `Iteration` values to use for each row constraint in seminaive.
+    iteration: HashMap<(usize, usize), Iteration>,
     /// Constraints to complete before we're done with the trie. Not in order.
     todo: Vec<Constraint>,
     /// A lazy trie over the bindings, represented as an ordered list of iterators.
@@ -248,6 +278,7 @@ struct Layer<'b> {
 type Values = HashMap<usize, Value>;
 
 /// A constraint that will be used to generate one layer of the trie.
+#[derive(Clone)]
 enum Constraint {
     /// Assert that an expression is equal to a class.
     Expr {
@@ -359,18 +390,19 @@ impl<'a, 'b> Bindings<'a, 'b> {
                         .chain([&y])
                         .map(|c| values.get(c).cloned())
                         .collect();
+                    let iteration = self.iteration[&(y, index)];
                     vec.push((
-                        (i, f, xs, y, row.clone()),
-                        self.funcs[f].rows(&row, Iteration::All).peekable(),
+                        (i, f, xs, y, row.clone(), iteration),
+                        self.funcs[f].rows(&row, iteration).peekable(),
                     ));
                 }
             }
-            if let Some(((i, f, xs, y, row), _)) = pick_shortest(&mut vec) {
+            if let Some(((i, f, xs, y, row, iteration), _)) = pick_shortest(&mut vec) {
                 let mut cs = xs.clone();
                 cs.push(y);
 
                 next = Some(Some(i));
-                iter = Some(Box::new(self.funcs[f].rows(&row, Iteration::All).map(
+                iter = Some(Box::new(self.funcs[f].rows(&row, iteration).map(
                     move |vs| Ok(cs.iter().zip(vs).map(|(c, v)| (*c, v.clone())).collect()),
                 )));
             }
