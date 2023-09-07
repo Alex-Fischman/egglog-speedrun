@@ -149,22 +149,19 @@ impl Query<'_> {
     /// Run this `Query` on the tables in the `Database`.
     pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
         let mut todo = Vec::new();
-        todo.extend(self.expr_deps.iter().map(|(&(class, expr), deps)| {
-            let expr = &self.classes[&class].exprs[expr];
-            Constraint::Expr { expr, class, deps }
-        }));
-        todo.extend(self.call_deps.iter().map(|(&(y, call), deps)| {
-            let (f, xs) = &self.classes[&y].calls[call];
-            Constraint::Row { f, xs, y, deps }
-        }));
+        todo.extend(
+            self.expr_deps
+                .keys()
+                .map(|&(class, index)| Constraint::Expr { class, index }),
+        );
+        todo.extend(
+            self.call_deps
+                .keys()
+                .map(|&(y, index)| Constraint::Row { y, index }),
+        );
 
         Ok(Bindings {
-            slice: &self.slice,
-            names: self
-                .classes
-                .iter()
-                .filter_map(|(k, v)| v.name.as_ref().map(|n| (*k, n.as_str())))
-                .collect(),
+            query: self,
             funcs,
             todo,
             trie: Vec::new(),
@@ -229,47 +226,39 @@ fn deps_from_expr(
 /// An iterator over all possible variable assignments that match a `Query`.
 // There are two lifetimes because `'a` comes from the `Query` but `'b` comes from the `Database`.
 pub struct Bindings<'a, 'b> {
-    /// See `Query`.
-    slice: &'a Slice<'a>,
-    /// See `Query`.
-    names: HashMap<usize, &'a str>,
+    /// The `Query` that was used to construct this iterator.
+    query: &'a Query<'a>,
     /// The current state of the `Table`s in the `Database`.
     funcs: &'b Funcs,
     /// Constraints to complete before we're done with the trie. Not in order.
-    todo: Vec<Constraint<'a>>,
+    todo: Vec<Constraint>,
     /// A lazy trie over the bindings, represented as an ordered list of iterators.
     /// Each iterator is bundled with the constraint used to generate it, if there is one.
-    trie: Vec<Layer<'a, 'b>>,
+    trie: Vec<Layer<'b>>,
 }
 
-struct Layer<'a, 'b> {
-    constraint: Option<Constraint<'a>>,
+struct Layer<'b> {
+    constraint: Option<Constraint>,
     iterator: std::iter::Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>,
 }
 
 type Values = HashMap<usize, Value>;
 
 /// A constraint that will be used to generate one layer of the trie.
-enum Constraint<'a> {
-    /// Compute an expression.
+enum Constraint {
+    /// Assert that an expression is equal to a class.
     Expr {
-        /// The expression to evaluate
-        expr: &'a Expr,
-        /// The class to check the expression against
+        /// The class that the constraint is in.
         class: usize,
-        /// The set of classes that `expr` refers to
-        deps: &'a HashSet<usize>,
+        /// The index of the constraint inside the class.
+        index: usize,
     },
-    /// Iterate over all rows in a table
+    /// Assert that all classes come from the same row in a table.
     Row {
-        /// The name of the table to iterate over
-        f: &'a str,
-        /// The classes to map the values in the inputs columns into
-        xs: &'a [usize],
-        /// The classes to map the value in the output column into
+        /// The class that the constraint is in.
         y: usize,
-        /// The set of classes that are inputs
-        deps: &'a HashSet<usize>,
+        /// The index of the constraint inside the class.
+        index: usize,
     },
 }
 
@@ -278,7 +267,12 @@ impl<'a, 'b> Bindings<'a, 'b> {
     fn values_to_vars(&self, values: &Values) -> Vars<'a> {
         values
             .iter()
-            .filter_map(|(class, value)| self.names.get(class).map(|name| (*name, value.clone())))
+            .filter_map(|(class, value)| {
+                self.query.classes[class]
+                    .name
+                    .as_ref()
+                    .map(|name| (name.as_str(), value.clone()))
+            })
             .collect()
     }
 
@@ -352,21 +346,27 @@ impl<'a, 'b> Bindings<'a, 'b> {
         let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
         // First, try to choose any constraint that can be immediately evaluated.
         for (i, constraint) in self.todo.iter().enumerate() {
-            match constraint {
-                Constraint::Expr { expr, class, deps } if deps.is_subset(&known) => {
-                    let y = expr.evaluate_ref(&self.values_to_vars(&values), self.funcs);
+            match *constraint {
+                Constraint::Expr { class, index }
+                    if self.query.expr_deps[&(class, index)].is_subset(&known) =>
+                {
+                    let y = self.query.classes[&class].exprs[index]
+                        .evaluate_ref(&self.values_to_vars(&values), self.funcs);
                     next = Some(Some(i));
                     iter = Some(match y {
-                        Ok(Some(v)) => Box::new(once(Ok(HashMap::from([(*class, v)])))),
+                        Ok(Some(v)) => Box::new(once(Ok(HashMap::from([(class, v)])))),
                         Ok(None) => Box::new(empty()),
                         Err(e) => Box::new(once(Err(e))),
                     });
                     break;
                 }
-                Constraint::Row { f, xs, y, deps } if deps.is_subset(&known) => {
+                Constraint::Row { y, index }
+                    if self.query.call_deps[&(y, index)].is_subset(&known) =>
+                {
+                    let (f, xs) = &self.query.classes[&y].calls[index];
                     let vs: Vec<Value> = xs.iter().map(|class| values[class].clone()).collect();
                     next = Some(Some(i));
-                    iter = Some(rows_to_iter(self.funcs[*f].rows_with_inputs(&vs), xs, *y));
+                    iter = Some(rows_to_iter(self.funcs[f].rows_with_inputs(&vs), xs, y));
                     break;
                 }
                 _ => {}
@@ -376,18 +376,19 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // Second, try to choose the row constraint with the shortest column index
             let mut shortest_column = usize::MAX;
             for (i, constraint) in self.todo.iter().enumerate() {
-                if let Constraint::Row { f, xs, y, .. } = constraint {
-                    for (column, class) in xs.iter().chain([y]).enumerate() {
+                if let &Constraint::Row { y, index } = constraint {
+                    let (f, xs) = &self.query.classes[&y].calls[index];
+                    for (column, class) in xs.iter().chain([&y]).enumerate() {
                         if let Some(value) = values.get(class) {
                             let column_len =
-                                self.funcs[*f].num_rows_with_value_in_column(value, column);
+                                self.funcs[f].num_rows_with_value_in_column(value, column);
                             if column_len < shortest_column {
                                 shortest_column = column_len;
                                 next = Some(Some(i));
                                 iter = Some(rows_to_iter(
-                                    self.funcs[*f].rows_with_value_in_column(value, column),
+                                    self.funcs[f].rows_with_value_in_column(value, column),
                                     xs,
-                                    *y,
+                                    y,
                                 ));
                             }
                         }
@@ -400,12 +401,13 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // If any do, intersect the values in those columns without consuming any constraints.
             let mut classes_to_columns: HashMap<usize, Vec<(String, _, _)>> = HashMap::new();
             for constraint in &self.todo {
-                if let Constraint::Row { f, xs, y, .. } = constraint {
-                    for (column, class) in xs.iter().chain([y]).enumerate() {
+                if let &Constraint::Row { y, index } = constraint {
+                    let (f, xs) = &self.query.classes[&y].calls[index];
+                    for (column, class) in xs.iter().chain([&y]).enumerate() {
                         classes_to_columns.entry(*class).or_default().push((
-                            (*f).to_owned(),
+                            f.clone(),
                             column,
-                            self.funcs[*f].num_values_in_column(column),
+                            self.funcs[f].num_values_in_column(column),
                         ));
                     }
                 }
@@ -438,12 +440,13 @@ impl<'a, 'b> Bindings<'a, 'b> {
             // Fourth, try to choose the row constraint with the shortest table
             let mut shortest_table = usize::MAX;
             for (i, constraint) in self.todo.iter().enumerate() {
-                if let Constraint::Row { f, xs, y, .. } = constraint {
-                    let table_len = self.funcs[*f].num_rows();
+                if let &Constraint::Row { y, index } = constraint {
+                    let (f, xs) = &self.query.classes[&y].calls[index];
+                    let table_len = self.funcs[f].num_rows();
                     if table_len < shortest_table {
                         shortest_table = table_len;
                         next = Some(Some(i));
-                        iter = Some(rows_to_iter(self.funcs[*f].rows(), xs, *y));
+                        iter = Some(rows_to_iter(self.funcs[f].rows(), xs, y));
                     }
                 }
             }
@@ -457,7 +460,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
             next = Some(None);
             iter = Some(Box::new(once(Err(format!(
                 "query was not range-restricted in {}",
-                self.slice
+                self.query.slice
             )))));
         }
         let iter: Box<dyn Iterator<Item = _>> = Box::new(iter.unwrap().filter_map(
