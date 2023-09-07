@@ -164,27 +164,31 @@ impl Table {
         Ok(changed)
     }
 
-    /// Convert an iterator of ids to an iterator of rows.
-    fn ids_to_rows<'a>(
-        &'a self,
-        ids: impl Iterator<Item = &'a RowId>,
-    ) -> impl Iterator<Item = &'a [Value]> {
-        ids.map(|&id| get_row(&self.data, &self.schema, id))
+    /// Get the output in this table with the specific inputs in the input columns.
+    /// This method never changes `self`; notably, it will not create new sort elements.
+    #[must_use]
+    pub fn evaluate(&self, xs: &[Value]) -> Option<Value> {
+        self.function.get(xs).map(|&id| {
+            get_row(&self.data, &self.schema, id)
+                .last()
+                .unwrap()
+                .clone()
+        })
     }
 
     /// Get all of the live rows in this table.
     pub fn rows(&self) -> impl Iterator<Item = &[Value]> {
-        self.ids_to_rows(self.function.values())
-    }
-
-    /// Get the (at most) one row in this table with the specific inputs in the input columns.
-    /// This method never changes `self`; notably, it will not create new sort elements.
-    pub fn rows_with_inputs(&self, xs: &[Value]) -> impl Iterator<Item = &[Value]> {
-        self.ids_to_rows(self.function.get(xs).into_iter())
+        self.function
+            .values()
+            .map(|&id| get_row(&self.data, &self.schema, id))
     }
 
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
     pub fn rows_with_values(&self, row: &[Option<Value>]) -> impl Iterator<Item = &[Value]> {
-        self.ids_to_rows(self.indices.get(row).into_iter().flatten())
+        self.indices
+            .get(row)
+            .into_iter()
+            .flatten()
+            .map(|&id| get_row(&self.data, &self.schema, id))
     }
 }

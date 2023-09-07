@@ -130,11 +130,7 @@ impl Expr {
     /// Returns `None` instead of `Err` iff the only error is a lookup failure inside a table.
     pub fn evaluate_ref(&self, vars: &Vars, funcs: &Funcs) -> Result<Option<Value>, String> {
         self.evaluate_private(vars, &mut |f, xs| {
-            Ok(funcs.get(f).map(|func| {
-                func.rows_with_inputs(&xs)
-                    .next()
-                    .map(|row| row.last().unwrap().clone())
-            }))
+            Ok(funcs.get(f).map(|func| func.evaluate(&xs)))
         })
     }
 
