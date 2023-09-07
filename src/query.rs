@@ -361,7 +361,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                         .collect();
                     vec.push((
                         (i, f, xs, y, row.clone()),
-                        self.funcs[f].rows_with_values(&row).peekable(),
+                        self.funcs[f].rows(&row).peekable(),
                     ));
                 }
             }
@@ -370,9 +370,9 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 cs.push(y);
 
                 next = Some(Some(i));
-                iter = Some(Box::new(self.funcs[f].rows_with_values(&row).map(
-                    move |vs| Ok(cs.iter().zip(vs).map(|(c, v)| (*c, v.clone())).collect()),
-                )));
+                iter = Some(Box::new(self.funcs[f].rows(&row).map(move |vs| {
+                    Ok(cs.iter().zip(vs).map(|(c, v)| (*c, v.clone())).collect())
+                })));
             }
         }
         if next.is_none() {

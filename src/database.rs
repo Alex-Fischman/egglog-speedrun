@@ -13,7 +13,7 @@ pub struct Database<'a> {
 impl Display for Database<'_> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         for (f_, table) in &self.funcs {
-            for row in table.rows() {
+            for row in table.rows(&vec![None; table.width()]) {
                 writeln!(
                     f,
                     "{f_}: {}",
