@@ -320,22 +320,6 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
     /// Build a single layer of the trie.
     fn build(&mut self, height: usize, values: Values) {
-        fn rows_to_iter<'a>(
-            rows: impl Iterator<Item = &'a [Value]> + 'a,
-            xs: &[usize],
-            y: usize,
-        ) -> Box<dyn Iterator<Item = Result<HashMap<usize, Value>, String>> + 'a> {
-            let mut classes = xs.to_vec();
-            classes.push(y);
-            Box::new(rows.map(move |row| {
-                Ok(classes
-                    .iter()
-                    .zip(row)
-                    .map(|(a, b)| (*a, b.clone()))
-                    .collect())
-            }))
-        }
-
         self.todo
             .extend(self.trie.drain(height..).filter_map(|mut l| {
                 assert!(l.iterator.peek().is_none());
@@ -382,8 +366,13 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 }
             }
             if let Some(((i, f, xs, y, row), _)) = pick_shortest(&mut vec) {
+                let mut cs = xs.clone();
+                cs.push(y);
+
                 next = Some(Some(i));
-                iter = Some(rows_to_iter(self.funcs[f].rows_with_values(&row), xs, y));
+                iter = Some(Box::new(self.funcs[f].rows_with_values(&row).map(
+                    move |vs| Ok(cs.iter().zip(vs).map(|(c, v)| (*c, v.clone())).collect()),
+                )));
             }
         }
         if next.is_none() {
