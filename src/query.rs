@@ -344,12 +344,11 @@ impl<'a, 'b> Bindings<'a, 'b> {
         // None: todo, Some(None): pass, Some(Some(i)): remove ith constraint
         let mut next: Option<Option<usize>> = None;
         let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
-        // First, try to choose any constraint that can be immediately evaluated.
+
+        // First, try to resolve any expr constraint.
         for (i, constraint) in self.todo.iter().enumerate() {
-            match *constraint {
-                Constraint::Expr { class, index }
-                    if self.query.expr_deps[&(class, index)].is_subset(&known) =>
-                {
+            if let &Constraint::Expr { class, index } = constraint {
+                if self.query.expr_deps[&(class, index)].is_subset(&known) {
                     let y = self.query.classes[&class].exprs[index]
                         .evaluate_ref(&self.values_to_vars(&values), self.funcs);
                     next = Some(Some(i));
@@ -360,98 +359,32 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     });
                     break;
                 }
-                Constraint::Row { y, index }
-                    if self.query.call_deps[&(y, index)].is_subset(&known) =>
-                {
-                    let (f, xs) = &self.query.classes[&y].calls[index];
-                    let vs: Vec<Value> = xs.iter().map(|class| values[class].clone()).collect();
-                    next = Some(Some(i));
-                    iter = Some(rows_to_iter(self.funcs[f].rows_with_inputs(&vs), xs, y));
-                    break;
-                }
-                _ => {}
             }
         }
         if next.is_none() {
-            // Second, try to choose the row constraint with the shortest column index.
+            // Then, try to resolve the shortest row constriant.
             let mut vec = Vec::new();
             for (i, constraint) in self.todo.iter().enumerate() {
                 if let &Constraint::Row { y, index } = constraint {
                     let (f, xs) = &self.query.classes[&y].calls[index];
-                    for (c, class) in xs.iter().chain([&y]).enumerate() {
-                        if let Some(v) = values.get(class) {
-                            vec.push((
-                                (i, f, xs, y, v, c),
-                                self.funcs[f].rows_with_value_in_column(v, c).peekable(),
-                            ));
-                        }
-                    }
+                    let row: Vec<_> = xs
+                        .iter()
+                        .chain([&y])
+                        .map(|c| values.get(c).cloned())
+                        .collect();
+                    vec.push((
+                        (i, f, xs, y, row.clone()),
+                        self.funcs[f].rows_with_values(&row).peekable(),
+                    ));
                 }
             }
-            if let Some(((i, f, xs, y, v, c), _)) = pick_shortest(&mut vec) {
+            if let Some(((i, f, xs, y, row), _)) = pick_shortest(&mut vec) {
                 next = Some(Some(i));
-                iter = Some(rows_to_iter(
-                    self.funcs[f].rows_with_value_in_column(v, c),
-                    xs,
-                    y,
-                ));
+                iter = Some(rows_to_iter(self.funcs[f].rows_with_values(&row), xs, y));
             }
         }
         if next.is_none() {
-            // Third, check if any classes appear in more than one row constraint.
-            // If any do, intersect the values in those columns without consuming any constraints.
-            let mut classes_to_columns: HashMap<usize, Vec<((_, _), _)>> = HashMap::new();
-            for constraint in &self.todo {
-                if let &Constraint::Row { y, index } = constraint {
-                    let (f, xs) = &self.query.classes[&y].calls[index];
-                    for (column, class) in xs.iter().chain([&y]).enumerate() {
-                        classes_to_columns.entry(*class).or_default().push((
-                            (f.clone(), column),
-                            self.funcs[f].values_in_column(column).peekable(),
-                        ));
-                    }
-                }
-            }
-            classes_to_columns.retain(|_, columns| columns.len() >= 2);
-            // This is the only strategy with any estimation; we don't know how many
-            // rows doing the intersection actually eliminates. We use the minimum
-            // number of values in any column as a proxy for intersection size,
-            // which is a proxy for number of rows eliminated.
-            if let Some((class, (((f, c), _), columns))) = classes_to_columns
-                .into_iter()
-                .map(|(k, mut v)| (k, (pick_shortest(&mut v).unwrap(), v)))
-                .min_by_key(|(_, ((_, len), _))| *len)
-            {
-                let funcs = self.funcs; // don't move self into the closure
-                next = Some(None);
-                iter = Some(Box::new(
-                    funcs[&f]
-                        .values_in_column(c)
-                        .filter(move |v| {
-                            columns
-                                .iter()
-                                .all(|((f, c), _)| funcs[f].is_value_in_column(v, *c))
-                        })
-                        .map(move |v| Ok(HashMap::from([(class, v.clone())]))),
-                ));
-            }
-        }
-        if next.is_none() {
-            // Fourth, try to choose the row constraint with the shortest table
-            let mut vec = Vec::new();
-            for (i, constraint) in self.todo.iter().enumerate() {
-                if let &Constraint::Row { y, index } = constraint {
-                    let (f, xs) = &self.query.classes[&y].calls[index];
-                    vec.push(((i, f, xs, y), self.funcs[f].rows().peekable()));
-                }
-            }
-            if let Some(((i, f, xs, y), _)) = pick_shortest(&mut vec) {
-                next = Some(Some(i));
-                iter = Some(rows_to_iter(self.funcs[f].rows(), xs, y));
-            }
-        }
-        if next.is_none() {
-            // Otherwise, give up since we have a dependency cycle
+            // Otherwise, give up, since the query wasn't range restricted.
             assert!(self
                 .todo
                 .iter()
@@ -462,6 +395,8 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 self.query.slice
             )))));
         }
+
+        // Check that none of the iterators values collide with known values
         let iter: Box<dyn Iterator<Item = _>> = Box::new(iter.unwrap().filter_map(
             move |result: Result<Values, String>| match result {
                 Err(e) => Some(Err(e)),

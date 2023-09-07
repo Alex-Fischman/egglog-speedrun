@@ -14,8 +14,8 @@ pub struct Table {
     data: Vec<Value>,
     /// The rows in this table indexed by all of the input columns.
     function: HashMap<Vec<Value>, RowId>,
-    /// The rows in this table indexed by the values in each column.
-    columns: Vec<HashMap<Value, HashSet<RowId>>>,
+    /// The indices into the data for this table. None means don't care.
+    indices: HashMap<Vec<Option<Value>>, HashSet<RowId>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,12 +31,12 @@ impl Table {
     #[must_use]
     pub fn new(name: String, schema: Vec<Type>, merge: Option<Expr>) -> Table {
         Table {
-            columns: vec![HashMap::new(); schema.len()],
             name,
             schema,
             merge,
             data: Vec::new(),
             function: HashMap::new(),
+            indices: HashMap::new(),
         }
     }
 
@@ -49,8 +49,8 @@ impl Table {
     fn remove_row(&mut self, id: RowId) {
         let row = get_row(&self.data, &self.schema, id);
         self.function.remove(&row[..row.len() - 1]);
-        for (column, x) in self.columns.iter_mut().zip(row) {
-            column.get_mut(x).unwrap().remove(&id);
+        for set in self.indices.values_mut() {
+            set.remove(&id);
         }
     }
 
@@ -98,8 +98,13 @@ impl Table {
         // Append the new row
         let id = self.length_id();
         self.function.insert(row[..row.len() - 1].to_vec(), id);
-        for (column, x) in self.columns.iter_mut().zip(&row) {
-            column.entry(x.clone()).or_default().insert(id);
+        for i in 0..2_usize.pow(u32::try_from(row.len()).unwrap()) {
+            let row = row.iter().enumerate().map(|(j, v)| match (i >> j) & 1 {
+                0 => None,
+                1 => Some(v.clone()),
+                _ => unreachable!(),
+            });
+            self.indices.entry(row.collect()).or_default().insert(id);
         }
         self.data.append(&mut row);
         Ok(true)
@@ -170,23 +175,8 @@ impl Table {
         self.ids_to_rows(self.function.get(xs).into_iter())
     }
 
-    /// Get all of the rows that have a specific value in a specific column.
-    pub fn rows_with_value_in_column(
-        &self,
-        value: &Value,
-        column: usize,
-    ) -> impl Iterator<Item = &[Value]> {
-        self.ids_to_rows(self.columns[column].get(value).into_iter().flatten())
-    }
-
-    /// Get all of the values in a column.
-    pub fn values_in_column(&self, column: usize) -> impl Iterator<Item = &Value> {
-        self.columns[column].keys()
-    }
-
-    /// Check if a specific value ever appears in a column.
-    #[must_use]
-    pub fn is_value_in_column(&self, value: &Value, column: usize) -> bool {
-        self.columns[column].contains_key(value)
+    /// Get the set of rows with specific values in specific columns. `None` means "don't care".
+    pub fn rows_with_values(&self, row: &[Option<Value>]) -> impl Iterator<Item = &[Value]> {
+        self.ids_to_rows(self.indices.get(row).into_iter().flatten())
     }
 }
