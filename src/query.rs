@@ -147,8 +147,10 @@ impl Query<'_> {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    #[must_use]
-    pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Bindings<'a, 'b> {
+    pub fn run<'a: 'c, 'b: 'c, 'c>(
+        &'a self,
+        funcs: &'b Funcs,
+    ) -> impl Iterator<Item = Result<Vars<'a>, String>> + 'c {
         let mut todo = Vec::new();
         todo.extend(
             self.expr_deps
