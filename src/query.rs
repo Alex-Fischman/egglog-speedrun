@@ -147,7 +147,8 @@ impl Query<'_> {
     }
 
     /// Run this `Query` on the tables in the `Database`.
-    pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Result<Bindings<'a, 'b>, String> {
+    #[must_use]
+    pub fn run<'a, 'b>(&'a self, funcs: &'b Funcs) -> Bindings<'a, 'b> {
         let mut todo = Vec::new();
         todo.extend(
             self.expr_deps
@@ -160,12 +161,12 @@ impl Query<'_> {
                 .map(|&(y, index)| Constraint::Row { y, index }),
         );
 
-        Ok(Bindings {
+        Bindings {
             query: self,
             funcs,
             todo,
             trie: Vec::new(),
-        })
+        }
     }
 }
 

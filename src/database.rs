@@ -70,7 +70,7 @@ impl<'a> Database<'a> {
 
     /// Get the value of `expr` given the functions in this `Database`.
     pub fn check(&self, query: &Query) -> Result<bool, String> {
-        match query.run(&self.funcs)?.next() {
+        match query.run(&self.funcs).next() {
             Some(Ok(_)) => Ok(true),
             None => Ok(false),
             Some(Err(e)) => Err(e),
@@ -82,7 +82,7 @@ impl<'a> Database<'a> {
         fixpoint(self, |db| {
             let mut changed = false;
             for (query, actions) in &db.rules {
-                let bindings: Vec<Vars> = query.run(&db.funcs)?.collect::<Result<_, _>>()?;
+                let bindings: Vec<Vars> = query.run(&db.funcs).collect::<Result<_, _>>()?;
                 for vars in bindings {
                     for action in actions {
                         changed |= run_action(action, &vars, &mut db.funcs, &mut db.sorts)?;
