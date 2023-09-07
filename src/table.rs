@@ -16,6 +16,8 @@ pub struct Table {
     function: HashMap<Vec<Value>, RowId>,
     /// The indices into the data for this table. None means don't care.
     indices: HashMap<Vec<Option<Value>>, HashSet<RowId>>,
+    /// The rows that have been added this iteration.
+    curr: Range<RowId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,6 +39,7 @@ impl Table {
             data: Vec::new(),
             function: HashMap::new(),
             indices: HashMap::new(),
+            curr: RowId(0)..RowId(0),
         }
     }
 
@@ -52,6 +55,11 @@ impl Table {
         for set in self.indices.values_mut() {
             set.remove(&id);
         }
+    }
+
+    /// This function advances the iteration pointers for semi-naive.
+    pub fn iteration_start(&mut self) {
+        self.curr = self.curr.end..self.length_id();
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.

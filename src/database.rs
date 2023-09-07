@@ -80,6 +80,7 @@ impl<'a> Database<'a> {
     /// Run the rules in this `Database` to fixpoint.
     pub fn run(&mut self) -> Result<(), String> {
         fixpoint(self, |db| {
+            db.funcs.values_mut().for_each(Table::iteration_start);
             let mut changed = false;
             for (query, actions) in &db.rules {
                 let bindings: Vec<Vars> = query.run(&db.funcs).collect::<Result<_, _>>()?;
