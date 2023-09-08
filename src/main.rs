@@ -57,6 +57,7 @@ fn run() -> Result<(), String> {
                 let string = format!("{slice}");
                 if !database.check(&Query::new(slice, &database.funcs(), patterns)?)? {
                     println!("failure: {string}");
+                    println!("{database}");
                 }
             }
         }

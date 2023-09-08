@@ -397,7 +397,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     ));
                 }
             }
-            if let Some(((i, f, xs, y, row, iteration), _)) = pick_shortest(&mut vec) {
+            if let Some((i, f, xs, y, row, iteration)) = pick_shortest(&mut vec) {
                 let mut cs = xs.clone();
                 cs.push(y);
 
@@ -482,19 +482,17 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
 /// Goes through the iterators and iterates each one until one of the iterators runs out.
 /// then returns the data associated with that iterator and its length. Do not rely on
 /// the state of the iterators after this function is finished.
-fn pick_shortest<T, I: Iterator>(vec: &mut Vec<(T, Peekable<I>)>) -> Option<(T, usize)> {
+fn pick_shortest<T, I: Iterator>(vec: &mut Vec<(T, Peekable<I>)>) -> Option<T> {
     if vec.is_empty() {
         None
     } else {
-        let mut len = 0;
         loop {
             for (i, (_, iterator)) in vec.iter_mut().enumerate() {
                 if iterator.peek().is_none() {
-                    return Some((vec.remove(i).0, len));
+                    return Some(vec.remove(i).0);
                 }
                 iterator.next();
             }
-            len += 1;
         }
     }
 }

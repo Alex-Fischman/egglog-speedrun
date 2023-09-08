@@ -139,14 +139,13 @@ impl Table {
 
     /// Get the output value of a row for some inputs. If there isn't a value, but the
     /// output type is a sort, create a new sort element, add it to the table, and return it.
-    pub fn get(&mut self, mut xs: Vec<Value>, sorts: &mut Sorts) -> Result<Option<Value>, String> {
-        Ok(if let Some(id) = self.get_id(&xs) {
-            Some(
-                get_row(&self.data, &self.schema, id)
-                    .last()
-                    .unwrap()
-                    .clone(),
-            )
+    pub fn get_mut(
+        &mut self,
+        mut xs: Vec<Value>,
+        sorts: &mut Sorts,
+    ) -> Result<Option<Value>, String> {
+        Ok(if let Some(y) = self.get_ref(&xs) {
+            Some(y)
         } else if let Type::Sort(sort) = &self.schema.last().unwrap() {
             let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
             xs.push(y.clone());
@@ -154,6 +153,19 @@ impl Table {
             Some(y)
         } else {
             None
+        })
+    }
+
+    /// Get the output in this table with the specific inputs in the input columns.
+    /// This method never changes `self`; notably, it will not create new sort elements.
+    #[must_use]
+    pub fn get_ref(&self, xs: &[Value]) -> Option<Value> {
+        assert_eq!(self.schema.len() - 1, xs.len());
+        self.get_id(xs).map(|id| {
+            get_row(&self.data, &self.schema, id)
+                .last()
+                .unwrap()
+                .clone()
         })
     }
 
@@ -181,19 +193,6 @@ impl Table {
             }
         }
         Ok(changed)
-    }
-
-    /// Get the output in this table with the specific inputs in the input columns.
-    /// This method never changes `self`; notably, it will not create new sort elements.
-    #[must_use]
-    pub fn evaluate(&self, xs: &[Value]) -> Option<Value> {
-        assert_eq!(self.schema.len() - 1, xs.len());
-        self.get_id(xs).map(|id| {
-            get_row(&self.data, &self.schema, id)
-                .last()
-                .unwrap()
-                .clone()
-        })
     }
 
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
