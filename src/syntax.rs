@@ -399,9 +399,10 @@ impl<'a> Sexp<'a> {
                             // a space in it to make sure there are never any conflicts.
                             let x = Expr::Var(String::from(" _"));
                             let (a, b) = (a.to_expr()?, b.to_expr()?);
-                            let s = match (a.get_type(funcs)?, b.get_type(funcs)?) {
-                                (Type::Sort(sx), Type::Sort(sy)) if sx == sy => sx,
-                                _ => return Err(format!("expected matching sorts, found {slice}")),
+                            let ((Ok(Type::Sort(s)), _) | (_, Ok(Type::Sort(s)))) =
+                                (a.get_type(funcs), b.get_type(funcs))
+                            else {
+                                return Err(format!("expected matching sorts, found {slice}"));
                             };
                             Ok(vec![Command::Rule(
                                 slice,
