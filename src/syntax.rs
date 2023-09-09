@@ -268,7 +268,7 @@ impl<'a> Sexp<'a> {
                         }
                         _ => Err(format!("expected `union` action, found {slice}")),
                     },
-                    f => match list[1..]
+                    f if funcs.contains_key(f) => match list[1..]
                         .iter()
                         .map(Sexp::to_expr)
                         .collect::<Result<_, _>>()
@@ -276,6 +276,7 @@ impl<'a> Sexp<'a> {
                         Ok(xs) => Ok(Action::Get(f.to_owned(), xs)),
                         Err(_) => Err(format!("expected action, found {slice}")),
                     },
+                    _ => Err(format!("expected action, found {slice}")),
                 },
                 _ => Err(format!("expected action, found {slice}")),
             },
@@ -399,7 +400,7 @@ impl<'a> Sexp<'a> {
                             };
                             Ok(vec![Command::Rule(slice, patterns, actions)])
                         }
-                        _ => Err(format!("expeted `rule` command, found {slice}")),
+                        _ => Err(format!("expected `rule` command, found {slice}")),
                     },
                     "rewrite" => match list.as_slice() {
                         [_, a, b] => {
@@ -418,7 +419,7 @@ impl<'a> Sexp<'a> {
                                 vec![Action::Union(b, x, s)],
                             )])
                         }
-                        _ => Err(format!("expeted `rewrite` command, found {slice}")),
+                        _ => Err(format!("expected `rewrite` command, found {slice}")),
                     },
                     "run" => match list.as_slice() {
                         [_] => Ok(vec![Command::Run(slice, None)]),
@@ -429,7 +430,7 @@ impl<'a> Sexp<'a> {
                                 .map_err(|_| format!("expected integer, found {i}"))?;
                             Ok(vec![Command::Run(slice, Some(i))])
                         }
-                        _ => Err(format!("expeted `run` command, found {slice}")),
+                        _ => Err(format!("expected `run` command, found {slice}")),
                     },
                     "check" => match list.as_slice() {
                         [_, patterns @ ..] => Ok(vec![Command::Check(
@@ -439,14 +440,15 @@ impl<'a> Sexp<'a> {
                                 .map(Sexp::to_pattern)
                                 .collect::<Result<Vec<_>, _>>()?,
                         )]),
-                        _ => Err(format!("expeted `check` command, found {slice}")),
+                        _ => Err(format!("expected `check` command, found {slice}")),
                     },
                     _ => {
                         let sexp = Sexp::List(slice, list);
-                        let action = sexp.to_action(funcs)?;
+                        let action = sexp.to_action(funcs);
                         let Sexp::List(slice, _) = sexp else {
                             unreachable!()
                         };
+                        let action = action.map_err(|_| format!("unknown command {slice}"))?;
                         Ok(vec![Command::Action(slice, action)])
                     }
                 },
