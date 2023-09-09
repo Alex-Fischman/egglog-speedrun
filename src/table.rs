@@ -161,16 +161,18 @@ impl Table {
         &mut self,
         mut xs: Vec<Value>,
         sorts: &mut Sorts,
-    ) -> Result<Option<Value>, String> {
+    ) -> Result<(Option<Value>, bool), String> {
         Ok(if let Some(y) = self.get_ref(&xs) {
-            Some(y)
-        } else if let Type::Sort(sort) = &self.schema.last().unwrap() {
-            let y = Value::Sort(sorts.get_mut(sort).unwrap().new_key(()));
+            (Some(y), false)
+        } else {
+            let y = match self.schema.last().unwrap() {
+                Type::Sort(sort) => Value::Sort(sorts.get_mut(sort).unwrap().new_key(())),
+                Type::Unit => Value::Unit,
+                _ => return Ok((None, false)),
+            };
             xs.push(y.clone());
             self.insert(xs, sorts)?;
-            Some(y)
-        } else {
-            None
+            (Some(y), true)
         })
     }
 

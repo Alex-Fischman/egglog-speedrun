@@ -49,7 +49,7 @@ fn run() -> Result<(), String> {
             Command::Rule(slice, patterns, actions) => {
                 database.rule(Query::new(slice, &database.funcs(), patterns)?, actions)?;
             }
-            Command::Action(action) => {
+            Command::Action(_, action) => {
                 database.action(&action)?;
             }
             Command::Run(_, i) => database.run(i)?,

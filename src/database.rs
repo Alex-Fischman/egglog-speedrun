@@ -5,7 +5,7 @@ use crate::*;
 /// The current state of the `egglog` program.
 #[derive(Default)]
 pub struct Database<'a> {
-    rules: Vec<(Query<'a>, Vec<Action<'a>>)>,
+    rules: Vec<(Query<'a>, Vec<Action>)>,
     funcs: Funcs,
     sorts: Sorts,
 }
@@ -56,7 +56,7 @@ impl<'a> Database<'a> {
     pub fn rule(
         &mut self,
         query: Query<'a>,
-        actions: Vec<Action<'a>>,
+        actions: Vec<Action>,
     ) -> Result<&mut Database<'a>, String> {
         self.rules.push((query, actions));
         Ok(self)
@@ -112,7 +112,7 @@ fn run_action(
 ) -> Result<bool, String> {
     // Run the action
     let changed = match action {
-        Action::Insert(_, f, xs, y) => {
+        Action::Insert(f, xs, y) => {
             let row = xs
                 .iter()
                 .chain([y])
@@ -121,16 +121,27 @@ fn run_action(
             funcs
                 .get_mut(f.as_str())
                 .ok_or(format!("unknown function {f}"))?
-                .insert(row, sorts)
+                .insert(row, sorts)?
+        }
+        Action::Get(f, xs) => {
+            let xs = xs
+                .iter()
+                .map(|x| x.evaluate_mut(vars, funcs, sorts))
+                .collect::<Result<Vec<_>, _>>()?;
+            funcs
+                .get_mut(f.as_str())
+                .ok_or(format!("unknown function {f}"))?
+                .get_mut(xs, sorts)?
+                .1
         }
         Action::Union(x, y, s) => match (
             x.evaluate_mut(vars, funcs, sorts)?,
             y.evaluate_mut(vars, funcs, sorts)?,
         ) {
-            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y),
+            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y)?,
             (_, _) => unreachable!(),
         },
-    }?;
+    };
     if changed {
         // Rebuild the database
         fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {

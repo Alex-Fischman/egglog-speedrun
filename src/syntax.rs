@@ -73,19 +73,29 @@ impl Display for Pattern {
 
 /// An action, either as a top-level `Command` or in the head of a `Command::Rule`.
 /// Each variant holds a `Slice` for error reporting.
-pub enum Action<'a> {
+pub enum Action {
     /// Add a row to table `f`, merging if necessary.
-    Insert(Slice<'a>, String, Vec<Expr>, Expr),
+    Insert(String, Vec<Expr>, Expr),
+    /// Add a row to table `f`, making a new output if necessary.
+    Get(String, Vec<Expr>),
     /// Union two elements of a sort together.
     Union(Expr, Expr, String),
 }
 
-impl Display for Action<'_> {
+impl Display for Action {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Action::Insert(_, f_, xs, y) => write!(
+            Action::Insert(f_, xs, y) => write!(
                 f,
                 "(set ({f_} {}) {y})",
+                xs.iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Action::Get(f_, xs) => write!(
+                f,
+                "({f_} {})",
                 xs.iter()
                     .map(|x| format!("{x}"))
                     .collect::<Vec<_>>()
@@ -106,13 +116,13 @@ pub enum Command<'a> {
     Function(Slice<'a>, String, Vec<Type>, Type, Option<Expr>),
     /// Create a rule, which performs the actions in the `head`
     /// if all the patterns in the `body` are matched.
-    Rule(Slice<'a>, Vec<Pattern>, Vec<Action<'a>>),
+    Rule(Slice<'a>, Vec<Pattern>, Vec<Action>),
     /// Run the `egglog` program, optionally with an iteration limit.
     Run(Slice<'a>, Option<usize>),
     /// Get the value of a given `Expr`.
     Check(Slice<'a>, Vec<Pattern>),
     /// Run an action.
-    Action(Action<'a>),
+    Action(Slice<'a>, Action),
 }
 
 impl Display for Command<'_> {
@@ -153,7 +163,7 @@ impl Display for Command<'_> {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Command::Action(q) => write!(f, "{q}"),
+            Command::Action(_, q) => write!(f, "{q}"),
         }
     }
 }
@@ -235,14 +245,13 @@ impl<'a> Sexp<'a> {
         }
     }
 
-    #[allow(clippy::wrong_self_convention)]
-    fn to_action(self, funcs: &HashMap<String, Type>) -> Result<Action<'a>, String> {
+    fn to_action(&self, funcs: &HashMap<String, Type>) -> Result<Action, String> {
         match self {
             Sexp::List(slice, list) => match list.get(0) {
                 Some(Sexp::Atom(action)) => match action.as_str() {
                     "set" => match list.as_slice() {
                         [_, call, y] => match call.to_expr()? {
-                            Expr::Call(f, xs) => Ok(Action::Insert(slice, f, xs, y.to_expr()?)),
+                            Expr::Call(f, xs) => Ok(Action::Insert(f, xs, y.to_expr()?)),
                             _ => Err(format!("expected `set` action, found {slice}")),
                         },
                         _ => Err(format!("expected `set` action, found {slice}")),
@@ -264,7 +273,7 @@ impl<'a> Sexp<'a> {
                         .map(Sexp::to_expr)
                         .collect::<Result<_, _>>()
                     {
-                        Ok(xs) => Ok(Action::Insert(slice, f.to_owned(), xs, Expr::Unit)),
+                        Ok(xs) => Ok(Action::Get(f.to_owned(), xs)),
                         Err(_) => Err(format!("expected action, found {slice}")),
                     },
                 },
@@ -368,12 +377,10 @@ impl<'a> Sexp<'a> {
                                 e.to_expr()?.get_type(funcs)?,
                                 None,
                             ),
-                            Command::Action(Action::Insert(
+                            Command::Action(
                                 slice,
-                                x.as_str().to_owned(),
-                                Vec::new(),
-                                e.to_expr()?,
-                            )),
+                                Action::Insert(x.as_str().to_owned(), Vec::new(), e.to_expr()?),
+                            ),
                         ]),
                         _ => Err(format!("expected `define` command, found {slice}")),
                     },
@@ -434,9 +441,14 @@ impl<'a> Sexp<'a> {
                         )]),
                         _ => Err(format!("expeted `check` command, found {slice}")),
                     },
-                    _ => Ok(vec![Command::Action(
-                        Sexp::List(slice, list).to_action(funcs)?,
-                    )]),
+                    _ => {
+                        let sexp = Sexp::List(slice, list);
+                        let action = sexp.to_action(funcs)?;
+                        let Sexp::List(slice, _) = sexp else {
+                            unreachable!()
+                        };
+                        Ok(vec![Command::Action(slice, action)])
+                    }
                 },
                 _ => Err(format!("expected command, found {slice}")),
             },
