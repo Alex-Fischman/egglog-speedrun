@@ -123,7 +123,7 @@ fn run_action(
                 .ok_or(format!("unknown function {f}"))?
                 .insert(row, sorts)?
         }
-        Action::Get(f, xs) => {
+        Action::GetMut(f, xs) => {
             let xs = xs
                 .iter()
                 .map(|x| x.evaluate_mut(vars, funcs, sorts))

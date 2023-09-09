@@ -77,7 +77,7 @@ pub enum Action {
     /// Add a row to table `f`, merging if necessary.
     Insert(String, Vec<Expr>, Expr),
     /// Add a row to table `f`, making a new output if necessary.
-    Get(String, Vec<Expr>),
+    GetMut(String, Vec<Expr>),
     /// Union two elements of a sort together.
     Union(Expr, Expr, String),
 }
@@ -93,7 +93,7 @@ impl Display for Action {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Action::Get(f_, xs) => write!(
+            Action::GetMut(f_, xs) => write!(
                 f,
                 "({f_} {})",
                 xs.iter()
@@ -273,7 +273,7 @@ impl<'a> Sexp<'a> {
                         .map(Sexp::to_expr)
                         .collect::<Result<_, _>>()
                     {
-                        Ok(xs) => Ok(Action::Get(f.to_owned(), xs)),
+                        Ok(xs) => Ok(Action::GetMut(f.to_owned(), xs)),
                         Err(_) => Err(format!("expected action, found {slice}")),
                     },
                     _ => Err(format!("expected action, found {slice}")),
