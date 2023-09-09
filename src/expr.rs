@@ -84,24 +84,6 @@ impl Display for Type {
     }
 }
 
-impl Value {
-    /// Asserts that this `Value` has the given `Type`.
-    pub fn assert_type(&self, t: &Type) -> Result<(), String> {
-        // we could do this by matching on a tuple, but we
-        // wouldn't get type errors when adding new `Value` variants
-        if match self {
-            Value::Unit => matches!(t, Type::Unit),
-            Value::Int(_) => matches!(t, Type::Int),
-            Value::String(_) => matches!(t, Type::String),
-            Value::Sort(_) => matches!(t, Type::Sort(_)),
-        } {
-            Ok(())
-        } else {
-            Err(format!("expected {t}, found {self}"))
-        }
-    }
-}
-
 /// A map from variable names to `Value`s.
 pub type Vars<'a> = HashMap<&'a str, Value>;
 /// A map from function names to `Table`s.

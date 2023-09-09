@@ -85,16 +85,34 @@ impl Table {
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the either the table or `sorts` was changed.
     pub fn insert(&mut self, mut row: Vec<Value>, sorts: &mut Sorts) -> Result<bool, String> {
-        if row.len() != self.schema.len() {
+        let types: Vec<Type> = row
+            .iter()
+            .enumerate()
+            .map(|(i, v)| match v {
+                Value::Unit => Type::Unit,
+                Value::Int(_) => Type::Int,
+                Value::String(_) => Type::String,
+                Value::Sort(_) => Type::Sort(match &self.schema[i] {
+                    Type::Sort(s) => s.clone(),
+                    _ => String::new(),
+                }),
+            })
+            .collect();
+        if self.schema != types {
             return Err(format!(
-                "expected row of length {}, found row of length {} for {}",
-                self.schema.len(),
-                row.len(),
+                "expected [{}], found [{}] for {}",
+                self.schema
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                types
+                    .iter()
+                    .map(|x| format!("{x}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 self.name,
             ));
-        }
-        for (t, x) in self.schema.iter().zip(&row) {
-            x.assert_type(t)?;
         }
 
         // If there's a conflict, remove the old row
