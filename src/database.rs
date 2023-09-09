@@ -78,8 +78,8 @@ impl<'a> Database<'a> {
     }
 
     /// Run the rules in this `Database` to fixpoint.
-    pub fn run(&mut self) -> Result<(), String> {
-        fixpoint(self, |db| {
+    pub fn run(&mut self, iterations: Option<usize>) -> Result<(), String> {
+        fixpoint(iterations, self, |db| {
             db.funcs.values_mut().for_each(Table::iteration_start);
             let mut changed = false;
             for (query, actions) in &db.rules {
@@ -133,7 +133,7 @@ fn run_action(
     }?;
     if changed {
         // Rebuild the database
-        fixpoint(&mut (funcs, sorts), |(funcs, sorts)| {
+        fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
             let mut changed = false;
             for table in funcs.values_mut() {
                 changed |= table.rebuild(sorts)?;
@@ -146,11 +146,16 @@ fn run_action(
     }
 }
 
-fn fixpoint<X, F: Fn(&mut X) -> Result<bool, String>>(x: &mut X, f: F) -> Result<bool, String> {
+fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<bool, String>
+where
+    F: Fn(&mut X) -> Result<bool, String>,
+{
     let mut changed = f(x)?;
     if changed {
-        while changed {
+        let mut i = 1;
+        while changed && iterations.map_or(true, |j| i < j) {
             changed = f(x)?;
+            i += 1;
         }
         Ok(true)
     } else {

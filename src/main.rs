@@ -52,7 +52,7 @@ fn run() -> Result<(), String> {
             Command::Action(action) => {
                 database.action(&action)?;
             }
-            Command::Run(_) => database.run()?,
+            Command::Run(_, i) => database.run(i)?,
             Command::Check(slice, patterns) => {
                 let string = format!("{slice}");
                 if !database.check(&Query::new(slice, &database.funcs(), patterns)?)? {

@@ -107,8 +107,8 @@ pub enum Command<'a> {
     /// Create a rule, which performs the actions in the `head`
     /// if all the patterns in the `body` are matched.
     Rule(Slice<'a>, Vec<Pattern>, Vec<Action<'a>>),
-    /// Run the `egglog` program.
-    Run(Slice<'a>),
+    /// Run the `egglog` program, optionally with an iteration limit.
+    Run(Slice<'a>, Option<usize>),
     /// Get the value of a given `Expr`.
     Check(Slice<'a>, Vec<Pattern>),
     /// Run an action.
@@ -143,7 +143,8 @@ impl Display for Command<'_> {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
-            Command::Run(_) => write!(f, "(run)"),
+            Command::Run(_, None) => write!(f, "(run)"),
+            Command::Run(_, Some(i)) => write!(f, "(run {i})"),
             Command::Check(_, ps) => write!(
                 f,
                 "(check {})",
@@ -413,7 +414,14 @@ impl<'a> Sexp<'a> {
                         _ => Err(format!("expeted `rewrite` command, found {slice}")),
                     },
                     "run" => match list.as_slice() {
-                        [_] => Ok(vec![Command::Run(slice)]),
+                        [_] => Ok(vec![Command::Run(slice, None)]),
+                        [_, Sexp::Atom(i)] => {
+                            let i = i
+                                .as_str()
+                                .parse::<usize>()
+                                .map_err(|_| format!("expected integer, found {i}"))?;
+                            Ok(vec![Command::Run(slice, Some(i))])
+                        }
                         _ => Err(format!("expeted `run` command, found {slice}")),
                     },
                     "check" => match list.as_slice() {
