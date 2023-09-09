@@ -60,6 +60,9 @@ fn run() -> Result<(), String> {
                     println!("{database}");
                 }
             }
+            Command::PrintSize(_, f) => {
+                println!("Function {f} has size {}", database.get_table_len(&f)?);
+            }
         }
     }
     Ok(())
