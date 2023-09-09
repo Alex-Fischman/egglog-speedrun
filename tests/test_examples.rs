@@ -30,7 +30,7 @@ fn test_examples() {
             .output()
             .expect("could not run egglog");
 
-        if !output.stdout.is_empty() || !output.stderr.is_empty() {
+        if !output.stderr.is_empty() {
             errors += 1;
             eprintln!("when running {}", example.display());
             if !output.stdout.is_empty() {

@@ -123,6 +123,8 @@ pub enum Command<'a> {
     Check(Slice<'a>, Vec<Pattern>),
     /// Print out the size of a table.
     PrintSize(Slice<'a>, String),
+    /// Print out timing statistics for the program so far.
+    PrintStats(Slice<'a>),
     /// Run an action.
     Action(Slice<'a>, Action),
 }
@@ -166,6 +168,7 @@ impl Display for Command<'_> {
                     .join(" ")
             ),
             Command::PrintSize(_, f_) => write!(f, "(print-size {f_})"),
+            Command::PrintStats(_) => write!(f, "(print-stats)"),
             Command::Action(_, q) => write!(f, "{q}"),
         }
     }
@@ -450,6 +453,10 @@ impl<'a> Sexp<'a> {
                             Ok(vec![Command::PrintSize(slice, f.as_str().to_owned())])
                         }
                         _ => Err(format!("expected `print-size` command, found {slice}")),
+                    },
+                    "print-stats" => match list.as_slice() {
+                        [_] => Ok(vec![Command::PrintStats(slice)]),
+                        _ => Err(format!("expected `print-stats` command, found {slice}")),
                     },
                     _ => {
                         let sexp = Sexp::List(slice, list);

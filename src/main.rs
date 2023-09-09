@@ -35,6 +35,8 @@ fn run() -> Result<(), String> {
     let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
     let source = std::rc::Rc::new(Source { name, text });
 
+    let start = std::time::Instant::now();
+
     let commands = parse(&source)?;
     let mut database = Database::default();
     for command in commands {
@@ -62,6 +64,9 @@ fn run() -> Result<(), String> {
             }
             Command::PrintSize(_, f) => {
                 println!("Function {f} has size {}", database.get_table_len(&f)?);
+            }
+            Command::PrintStats(_) => {
+                println!("Program has taken {:.3}s", start.elapsed().as_secs_f64());
             }
         }
     }
