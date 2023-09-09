@@ -100,6 +100,14 @@ impl<'a> Database<'a> {
     pub fn funcs(&self) -> HashSet<&String> {
         self.funcs.keys().collect()
     }
+
+    /// Get the length of a table in the database.
+    pub fn get_table_len(&self, func: &str) -> Result<usize, String> {
+        match self.funcs.get(func) {
+            Some(table) => Ok(table.height()),
+            None => Err(format!("no function {func} in database")),
+        }
+    }
 }
 
 /// Returns true if running the action changed `funcs` or `sorts`.

@@ -49,9 +49,10 @@ impl Table {
         self.schema.len()
     }
 
-    /// Returns a `RowId` with the total number of rows in the table (ignoring liveness).
-    fn length_id(&self) -> RowId {
-        RowId(self.data.len() / self.schema.len())
+    /// Get the number of rows in this table.
+    #[must_use]
+    pub fn height(&self) -> usize {
+        self.data.len() / self.schema.len()
     }
 
     /// Get all the `RowId`s corresponding to the given values.
@@ -79,7 +80,7 @@ impl Table {
 
     /// This function advances the iteration pointers for semi-naive.
     pub fn iteration_start(&mut self) {
-        self.prev = self.prev.end..self.length_id();
+        self.prev = self.prev.end..RowId(self.height());
     }
 
     /// Add a row to the table, merging if a row with the given inputs already exists.
@@ -142,7 +143,7 @@ impl Table {
         }
 
         // Append the new row
-        let id = self.length_id();
+        let id = RowId(self.height());
         for i in 0..2_usize.pow(u32::try_from(row.len()).unwrap()) {
             let row = row.iter().enumerate().map(|(j, v)| match (i >> j) & 1 {
                 0 => None,
@@ -222,7 +223,7 @@ impl Table {
             .range(match i {
                 Iteration::Past => RowId(0)..self.prev.start,
                 Iteration::Prev => self.prev.clone(),
-                Iteration::All => RowId(0)..self.length_id(),
+                Iteration::All => RowId(0)..RowId(self.height()),
             })
             .map(|&id| get_row(&self.data, &self.schema, id))
     }
