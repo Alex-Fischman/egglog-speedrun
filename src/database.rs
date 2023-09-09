@@ -153,16 +153,20 @@ fn run_action(
     if changed {
         // Rebuild the database
         fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
+            let dirty: HashMap<String, HashSet<usize>> = sorts
+                .iter()
+                .map(|(sort, uf)| (sort.clone(), uf.dirty().clone()))
+                .collect();
+            sorts.values_mut().for_each(UnionFind::reset);
+
             let mut changed = false;
             for table in funcs.values_mut() {
-                changed |= table.rebuild(sorts)?;
+                changed |= table.rebuild(sorts, &dirty)?;
             }
             Ok(changed)
         })?;
-        Ok(true)
-    } else {
-        Ok(false)
     }
+    Ok(changed)
 }
 
 fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<bool, String>

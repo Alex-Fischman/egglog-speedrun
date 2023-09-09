@@ -1,12 +1,18 @@
 //! This module contains an implementation of the Union Find datastructure,
 //! also called the Disjoint Set Union datastructure.
 
+use crate::*;
+
 /// A data structure for efficiently unioning sets of `usize`s.
 /// It also supports having each set map to a value, and merging them when their
 /// sets are unioned. If you don't want values, use () as the value and call `default`.
 pub struct UnionFind<'a, V> {
+    /// The graph that this data structure uses internally.
     trees: Vec<Node<V>>,
+    /// The function to combine to `V`s.
     merge: Box<dyn Fn(V, V) -> Result<V, String> + 'a>,
+    /// The set of keys that were canonical but aren't anymore.
+    dirty: HashSet<usize>,
 }
 
 enum Node<V> {
@@ -21,6 +27,7 @@ impl Default for UnionFind<'static, ()> {
         UnionFind {
             trees: Vec::new(),
             merge: Box::new(|_: (), _: ()| Ok(())),
+            dirty: HashSet::new(),
         }
     }
 }
@@ -31,6 +38,7 @@ impl<'a, V> UnionFind<'a, V> {
         UnionFind {
             trees: Vec::new(),
             merge: Box::new(merge),
+            dirty: HashSet::new(),
         }
     }
 
@@ -82,14 +90,17 @@ impl<'a, V> UnionFind<'a, V> {
             std::cmp::Ordering::Less => {
                 self.trees[a] = Node::Child(b);
                 self.trees[b] = Node::Root(z, q);
+                self.dirty.insert(a);
             }
             std::cmp::Ordering::Greater => {
                 self.trees[a] = Node::Root(z, p);
                 self.trees[b] = Node::Child(a);
+                self.dirty.insert(b);
             }
             std::cmp::Ordering::Equal => {
                 self.trees[a] = Node::Root(z, p + 1);
                 self.trees[b] = Node::Child(a);
+                self.dirty.insert(b);
             }
         }
         Ok(true)
@@ -119,6 +130,17 @@ impl<'a, V> UnionFind<'a, V> {
             Node::Child(_) => None,
             Node::Root(v, _) => Some((k, v)),
         })
+    }
+
+    /// Get all of the keys that used to be canonical but aren't anymore.
+    #[must_use]
+    pub fn dirty(&self) -> &HashSet<usize> {
+        &self.dirty
+    }
+
+    /// Reset the set of dirty keys (see `UnionFind::dirty`).
+    pub fn reset(&mut self) {
+        self.dirty.clear();
     }
 }
 

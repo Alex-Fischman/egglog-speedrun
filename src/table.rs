@@ -52,7 +52,7 @@ impl Table {
     /// Get the number of rows in this table.
     #[must_use]
     pub fn height(&self) -> usize {
-        self.data.len() / self.schema.len()
+        self.data.len() / self.width()
     }
 
     /// Get all the `RowId`s corresponding to the given values.
@@ -181,7 +181,7 @@ impl Table {
     /// This method never changes `self`; notably, it will not create new sort elements.
     #[must_use]
     pub fn get_ref(&self, xs: &[Value]) -> Option<Value> {
-        assert_eq!(self.schema.len() - 1, xs.len());
+        assert_eq!(self.width() - 1, xs.len());
         self.get_id(xs).map(|id| {
             get_row(&self.data, &self.schema, id)
                 .last()
@@ -192,33 +192,46 @@ impl Table {
 
     /// Rebuild the indices so that each `Value::Sort` holds a canonical key.
     /// Does not run to fixpoint, even if rebuilding changes `sorts`.
-    pub fn rebuild(&mut self, sorts: &mut Sorts) -> Result<bool, String> {
-        let mut changed = false;
-        // For each row, replace it with its canonicalized version.
-        let ids = self.get_ids(&vec![None; self.schema.len()]).clone();
-        for id in ids {
-            let row = get_row(&self.data, &self.schema, id)
-                .iter()
-                .zip(&self.schema)
-                .map(|(v, t)| match (v, t) {
-                    (Value::Sort(v), Type::Sort(s)) => {
-                        Value::Sort(sorts.get_mut(s).unwrap().find(*v))
-                    }
-                    _ => v.clone(),
-                })
-                .collect();
-            if row != get_row(&self.data, &self.schema, id) {
-                changed = true;
-                self.remove_row(id);
-                self.insert(row, sorts)?;
+    pub fn rebuild(
+        &mut self,
+        sorts: &mut Sorts,
+        dirty: &HashMap<String, HashSet<usize>>,
+    ) -> Result<bool, String> {
+        // For each row containing a dirty value, replace it with its canonicalized version.
+        let mut ids = HashSet::new();
+        let mut row = vec![None; self.width()];
+        for (column, sort) in self.schema.iter().enumerate() {
+            if let Type::Sort(sort) = sort {
+                for value in &dirty[sort] {
+                    row[column] = Some(Value::Sort(*value));
+                    ids.extend(self.get_ids(&row));
+                    row[column] = None;
+                }
             }
+        }
+        let changed = !ids.is_empty();
+        for id in ids {
+            self.remove_row(id);
+            self.insert(
+                get_row(&self.data, &self.schema, id)
+                    .iter()
+                    .zip(&self.schema)
+                    .map(|(v, t)| match (v, t) {
+                        (Value::Sort(v), Type::Sort(s)) => {
+                            Value::Sort(sorts.get_mut(s).unwrap().find(*v))
+                        }
+                        _ => v.clone(),
+                    })
+                    .collect(),
+                sorts,
+            )?;
         }
         Ok(changed)
     }
 
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
     pub fn rows(&self, row: &[Option<Value>], i: Iteration) -> impl Iterator<Item = &[Value]> {
-        assert_eq!(self.schema.len(), row.len());
+        assert_eq!(self.width(), row.len());
         self.get_ids(row)
             .range(match i {
                 Iteration::Past => RowId(0)..self.prev.start,
