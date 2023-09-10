@@ -73,8 +73,16 @@ impl Table {
 
     /// Removes a row from all indices so it can't be referenced except by `RowId`.
     fn remove_row(&mut self, id: RowId) {
-        for set in self.indices.values_mut() {
-            set.remove(&id);
+        let row = get_row(&self.data, &self.schema, id);
+        for i in 0..2_usize.pow(u32::try_from(row.len()).unwrap()) {
+            let row = row.iter().enumerate().map(|(j, v)| match (i >> j) & 1 {
+                0 => None,
+                1 => Some(v.clone()),
+                _ => unreachable!(),
+            });
+            if let Some(set) = self.indices.get_mut(&row.collect::<Vec<_>>()) {
+                set.remove(&id);
+            }
         }
     }
 

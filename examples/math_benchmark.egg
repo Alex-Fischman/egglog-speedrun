@@ -58,7 +58,7 @@
 (Add (Mul (Var "y") (Add (Var "x") (Var "y"))) (Sub (Add (Var "x") (Const 2)) (Add (Var "x") (Var "x"))))
 (Div (Const 1) (Sub (Div (Add (Const 1) (Sqrt (Var "five"))) (Const 2)) (Div (Sub (Const 1) (Sqrt (Var "five"))) (Const 2))))
 
-(run 6)
+(run 7)
 (print-size Add)
 (print-size Mul)
 
