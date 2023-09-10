@@ -26,7 +26,7 @@ impl Default for UnionFind<'static, ()> {
     fn default() -> UnionFind<'static, ()> {
         UnionFind {
             trees: Vec::new(),
-            merge: Box::new(|_: (), _: ()| Ok(())),
+            merge: Box::new(|(), ()| Ok(())),
             dirty: HashSet::new(),
         }
     }
