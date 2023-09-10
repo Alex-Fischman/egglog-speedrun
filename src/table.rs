@@ -50,9 +50,15 @@ impl Table {
     }
 
     /// Get the number of rows in this table.
-    #[must_use]
-    pub fn height(&self) -> usize {
+    fn height(&self) -> usize {
         self.data.len() / self.width()
+    }
+
+    /// Get the number of live rows in this table.
+    #[must_use]
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.get_ids(&vec![None; self.width()]).len()
     }
 
     /// Get all the `RowId`s corresponding to the given values.

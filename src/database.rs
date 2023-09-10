@@ -65,6 +65,7 @@ impl<'a> Database<'a> {
     /// Run an action to this `Database`.
     pub fn action(&mut self, action: &Action) -> Result<&mut Database<'a>, String> {
         run_action(action, &HashMap::new(), &mut self.funcs, &mut self.sorts)?;
+        rebuild(&mut self.funcs, &mut self.sorts)?;
         Ok(self)
     }
 
@@ -89,6 +90,9 @@ impl<'a> Database<'a> {
                         changed |= run_action(action, &vars, &mut db.funcs, &mut db.sorts)?;
                     }
                 }
+                if changed {
+                    rebuild(&mut db.funcs, &mut db.sorts)?;
+                }
             }
             Ok(changed)
         })
@@ -101,17 +105,17 @@ impl<'a> Database<'a> {
         self.funcs.keys().collect()
     }
 
-    /// Get the length of a table in the database.
+    /// Get the length of a table in this database.
     pub fn get_table_len(&self, func: &str) -> Result<usize, String> {
         match self.funcs.get(func) {
-            Some(table) => Ok(table.height()),
+            Some(table) => Ok(table.len()),
             None => Err(format!("no function {func} in database")),
         }
     }
 }
 
 /// Returns true if running the action changed `funcs` or `sorts`.
-/// Not a method on `Database` because we need to not borrow `rules`.
+// Not a method on `Database` because we need to not borrow `rules`.
 fn run_action(
     action: &Action,
     vars: &Vars,
@@ -119,7 +123,7 @@ fn run_action(
     sorts: &mut Sorts,
 ) -> Result<bool, String> {
     // Run the action
-    let changed = match action {
+    Ok(match action {
         Action::Insert(f, xs, y) => {
             let row = xs
                 .iter()
@@ -149,23 +153,24 @@ fn run_action(
             (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y)?,
             (_, _) => unreachable!(),
         },
-    };
-    if changed {
-        // Rebuild the database
-        fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
-            let dirty: HashMap<String, HashSet<usize>> = sorts
-                .iter_mut()
-                .map(|(sort, uf)| (sort.clone(), uf.dirty()))
-                .collect();
+    })
+}
 
-            let mut changed = false;
-            for table in funcs.values_mut() {
-                changed |= table.rebuild(sorts, &dirty)?;
-            }
-            Ok(changed)
-        })?;
-    }
-    Ok(changed)
+/// Rebuild every table in this database.
+// Not a method on `Database` because we need to not borrow `rules`.
+fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<bool, String> {
+    fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
+        let dirty: HashMap<String, HashSet<usize>> = sorts
+            .iter_mut()
+            .map(|(sort, uf)| (sort.clone(), uf.dirty()))
+            .collect();
+
+        let mut changed = false;
+        for table in funcs.values_mut() {
+            changed |= table.rebuild(sorts, &dirty)?;
+        }
+        Ok(changed)
+    })
 }
 
 fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<bool, String>
