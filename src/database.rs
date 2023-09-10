@@ -154,10 +154,9 @@ fn run_action(
         // Rebuild the database
         fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
             let dirty: HashMap<String, HashSet<usize>> = sorts
-                .iter()
-                .map(|(sort, uf)| (sort.clone(), uf.dirty().clone()))
+                .iter_mut()
+                .map(|(sort, uf)| (sort.clone(), uf.dirty()))
                 .collect();
-            sorts.values_mut().for_each(UnionFind::reset);
 
             let mut changed = false;
             for table in funcs.values_mut() {

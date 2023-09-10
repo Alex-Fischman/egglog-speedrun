@@ -132,15 +132,10 @@ impl<'a, V> UnionFind<'a, V> {
         })
     }
 
-    /// Get all of the keys that used to be canonical but aren't anymore.
-    #[must_use]
-    pub fn dirty(&self) -> &HashSet<usize> {
-        &self.dirty
-    }
-
-    /// Reset the set of dirty keys (see `UnionFind::dirty`).
-    pub fn reset(&mut self) {
-        self.dirty.clear();
+    /// Get all of the keys that used to be canonical but aren't anymore,
+    /// since the last time this function was called.
+    pub fn dirty(&mut self) -> HashSet<usize> {
+        std::mem::take(&mut self.dirty)
     }
 }
 
