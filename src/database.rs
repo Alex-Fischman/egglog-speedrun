@@ -96,7 +96,6 @@ impl<'a> Database<'a> {
             }
             Ok(changed)
         })
-        .map(|_| ())
     }
 
     /// Get the names of the functions in this database.
@@ -158,7 +157,7 @@ fn run_action(
 
 /// Rebuild every table in this database.
 // Not a method on `Database` because we need to not borrow `rules`.
-fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<bool, String> {
+fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<(), String> {
     fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
         let dirty: HashMap<String, HashSet<usize>> = sorts
             .iter_mut()
@@ -173,19 +172,15 @@ fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<bool, String> {
     })
 }
 
-fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<bool, String>
+fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<(), String>
 where
     F: Fn(&mut X) -> Result<bool, String>,
 {
-    let mut changed = f(x)?;
-    if changed {
-        let mut i = 1;
-        while changed && iterations.map_or(true, |j| i < j) {
-            changed = f(x)?;
-            i += 1;
-        }
-        Ok(true)
-    } else {
-        Ok(false)
+    let mut changed = true;
+    let mut i = 0;
+    while changed && iterations.map_or(true, |j| i < j) {
+        changed = f(x)?;
+        i += 1;
     }
+    Ok(())
 }
