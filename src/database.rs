@@ -149,7 +149,7 @@ fn run_action(
             x.evaluate_mut(vars, funcs, sorts)?,
             y.evaluate_mut(vars, funcs, sorts)?,
         ) {
-            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y)?,
+            (Value::Sort(x), Value::Sort(y)) => sorts.get_mut(s).unwrap().union(x, y)?.1,
             (_, _) => unreachable!(),
         },
     })

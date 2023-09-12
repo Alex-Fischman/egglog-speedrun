@@ -144,8 +144,9 @@ impl Table {
                 None if old == new => new.clone(),
                 None => match (old.clone(), new.clone(), self.schema.last().unwrap()) {
                     (Value::Sort(old), Value::Sort(new), Type::Sort(s)) => {
-                        changed |= sorts.get_mut(s).unwrap().union(old, new)?;
-                        Value::Sort(sorts.get_mut(s).unwrap().find(old))
+                        let (s, c) = sorts.get_mut(s).unwrap().union(old, new)?;
+                        changed |= c;
+                        Value::Sort(s)
                     }
                     _ => return Err(format!("{old} != {new} in {}", self.name)),
                 },

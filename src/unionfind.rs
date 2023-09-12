@@ -70,12 +70,12 @@ impl<'a, V> UnionFind<'a, V> {
     }
 
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
-    /// Returns whether the `UnionFind` was changed or not.
-    pub fn union(&mut self, a: usize, b: usize) -> Result<bool, String> {
+    /// Returns the new root, as well as whether the `UnionFind` was changed or not.
+    pub fn union(&mut self, a: usize, b: usize) -> Result<(usize, bool), String> {
         let a = self.find(a);
         let b = self.find(b);
         if a == b {
-            return Ok(false);
+            return Ok((a, false));
         }
 
         // We want to move x and y into self.merge, so we swap them with a default value.
@@ -91,19 +91,21 @@ impl<'a, V> UnionFind<'a, V> {
                 self.trees[a] = Node::Child(b);
                 self.trees[b] = Node::Root(z, q);
                 self.dirty.insert(a);
+                Ok((b, true))
             }
             std::cmp::Ordering::Greater => {
                 self.trees[a] = Node::Root(z, p);
                 self.trees[b] = Node::Child(a);
                 self.dirty.insert(b);
+                Ok((a, true))
             }
             std::cmp::Ordering::Equal => {
                 self.trees[a] = Node::Root(z, p + 1);
                 self.trees[b] = Node::Child(a);
                 self.dirty.insert(b);
+                Ok((a, true))
             }
         }
-        Ok(true)
     }
 
     /// Merge a new value into an existing set without creating a new key.
