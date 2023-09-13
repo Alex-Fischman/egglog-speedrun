@@ -213,7 +213,7 @@ impl Table {
         dirty: &HashMap<String, HashSet<usize>>,
     ) -> Result<bool, String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
-        let mut ids = HashSet::new();
+        let mut ids = BTreeSet::new();
         let mut row = vec![None; self.width()];
         for (column, sort) in self.schema.iter().enumerate() {
             if let Type::Sort(sort) = sort {

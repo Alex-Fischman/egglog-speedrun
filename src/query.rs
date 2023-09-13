@@ -11,10 +11,10 @@ pub struct Query<'a> {
     classes: HashMap<usize, EqClass>,
     /// A dependency map used to generate an ordering. The keys are (class, expr) pairs,
     /// and the values are sets of class indices that need to be computed before the expr.
-    expr_deps: HashMap<(usize, usize), HashSet<usize>>,
+    expr_deps: BTreeMap<(usize, usize), HashSet<usize>>,
     /// A dependency map used to generate an ordering. The keys are (class, call) pairs,
     /// and the values are sets of class indices that should be computed before the call.
-    call_deps: HashMap<(usize, usize), HashSet<usize>>,
+    call_deps: BTreeMap<(usize, usize), HashSet<usize>>,
 }
 
 #[derive(Default)]
@@ -120,7 +120,7 @@ impl Query<'_> {
         }
 
         // Compute dependency constraints which give an ordering for `Expr` computation.
-        let mut expr_deps: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
+        let mut expr_deps: BTreeMap<(usize, usize), HashSet<usize>> = BTreeMap::new();
         for (key, class) in &classes {
             for (i, expr) in class.exprs.iter().enumerate() {
                 let mut set = HashSet::new();
@@ -130,7 +130,7 @@ impl Query<'_> {
         }
 
         // Compute dependency constraints which give an ordering for call computation.
-        let mut call_deps: HashMap<(usize, usize), HashSet<usize>> = HashMap::new();
+        let mut call_deps: BTreeMap<(usize, usize), HashSet<usize>> = BTreeMap::new();
         for (key, class) in &classes {
             for (i, call) in class.calls.iter().enumerate() {
                 let set: HashSet<usize> = call.1.iter().copied().collect();
