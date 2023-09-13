@@ -161,12 +161,14 @@ fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<(), String> {
             .iter_mut()
             .map(|(sort, uf)| (sort.clone(), uf.dirty()))
             .collect();
-
-        let mut changed = false;
-        for table in funcs.values_mut() {
-            changed |= table.rebuild(sorts, &dirty)?;
+        if dirty.values().all(HashSet::is_empty) {
+            Ok(false)
+        } else {
+            for table in funcs.values_mut() {
+                table.rebuild(sorts, &dirty)?;
+            }
+            Ok(true)
         }
-        Ok(changed)
     })
 }
 

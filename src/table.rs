@@ -211,7 +211,7 @@ impl Table {
         &mut self,
         sorts: &mut Sorts,
         dirty: &HashMap<String, HashSet<usize>>,
-    ) -> Result<bool, String> {
+    ) -> Result<(), String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
         let mut ids = BTreeSet::new();
         let mut row = vec![None; self.width()];
@@ -224,7 +224,6 @@ impl Table {
                 }
             }
         }
-        let changed = !ids.is_empty();
         for id in ids {
             self.remove_row(id);
             self.insert(
@@ -241,7 +240,7 @@ impl Table {
                 sorts,
             )?;
         }
-        Ok(changed)
+        Ok(())
     }
 
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
