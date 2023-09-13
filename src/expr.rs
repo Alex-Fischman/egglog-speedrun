@@ -87,7 +87,7 @@ impl Display for Type {
 /// A map from variable names to `Value`s.
 pub type Vars<'a> = HashMap<&'a str, Value>;
 /// A map from function names to `Table`s.
-pub type Funcs = HashMap<String, Table>;
+pub type Funcs = BTreeMap<String, Table>;
 /// A map from sort names to `UnionFind`s.
 pub type Sorts = HashMap<String, UnionFind<'static, ()>>;
 

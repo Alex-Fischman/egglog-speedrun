@@ -138,7 +138,7 @@ impl Table {
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
                     &HashMap::from([("old", old.clone()), ("new", new.clone())]),
-                    &mut HashMap::new(),
+                    &mut BTreeMap::new(),
                     sorts,
                 )?,
                 None if old == new => new.clone(),
