@@ -80,19 +80,17 @@ impl<'a> Database<'a> {
 
     /// Run the rules in this `Database` to fixpoint.
     pub fn run(&mut self, iterations: Option<usize>) -> Result<(), String> {
-        fixpoint(iterations, self, |db| {
-            db.funcs.values_mut().for_each(Table::iteration_start);
+        fixpoint(iterations, || {
+            self.funcs.values_mut().for_each(Table::iteration_start);
             let mut changed = false;
-            for (query, actions) in &db.rules {
-                let bindings: Vec<Vars> = query.run(&db.funcs, true).collect::<Result<_, _>>()?;
+            for (query, actions) in &self.rules {
+                let bindings: Vec<Vars> = query.run(&self.funcs, true).collect::<Result<_, _>>()?;
                 for vars in bindings {
                     for action in actions {
-                        changed |= run_action(action, &vars, &mut db.funcs, &mut db.sorts)?;
+                        changed |= run_action(action, &vars, &mut self.funcs, &mut self.sorts)?;
                     }
                 }
-                if changed {
-                    rebuild(&mut db.funcs, &mut db.sorts)?;
-                }
+                rebuild(&mut self.funcs, &mut self.sorts)?;
             }
             Ok(changed)
         })
@@ -158,7 +156,7 @@ fn run_action(
 /// Rebuild every table in this database.
 // Not a method on `Database` because we need to not borrow `rules`.
 fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<(), String> {
-    fixpoint(None, &mut (funcs, sorts), |(funcs, sorts)| {
+    fixpoint(None, || {
         let dirty: HashMap<String, HashSet<usize>> = sorts
             .iter_mut()
             .map(|(sort, uf)| (sort.clone(), uf.dirty()))
@@ -172,14 +170,14 @@ fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<(), String> {
     })
 }
 
-fn fixpoint<X, F>(iterations: Option<usize>, x: &mut X, f: F) -> Result<(), String>
+fn fixpoint<F>(iterations: Option<usize>, mut f: F) -> Result<(), String>
 where
-    F: Fn(&mut X) -> Result<bool, String>,
+    F: FnMut() -> Result<bool, String>,
 {
     let mut changed = true;
     let mut i = 0;
     while changed && iterations.map_or(true, |j| i < j) {
-        changed = f(x)?;
+        changed = f()?;
         i += 1;
     }
     Ok(())

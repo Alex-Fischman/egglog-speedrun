@@ -33,12 +33,8 @@ fn test_examples() {
         if !output.stderr.is_empty() {
             errors += 1;
             eprintln!("when running {}", example.display());
-            if !output.stdout.is_empty() {
-                eprintln!("{}", String::from_utf8(output.stdout).unwrap());
-            }
-            if !output.stderr.is_empty() {
-                eprintln!("{}", String::from_utf8(output.stderr).unwrap());
-            }
+            println!("{}", String::from_utf8(output.stdout).unwrap());
+            eprintln!("{}", String::from_utf8(output.stderr).unwrap());
         }
     }
 
