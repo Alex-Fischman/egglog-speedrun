@@ -371,7 +371,7 @@ impl<'a> Sexp<'a> {
                             Err(format!("expected `datatype` command, found {slice}"))
                         }
                     }
-                    "define" => match list.as_slice() {
+                    "let" => match list.as_slice() {
                         [_, Sexp::Atom(x), e] => Ok(vec![
                             Command::Function(
                                 // manual clone
@@ -389,7 +389,7 @@ impl<'a> Sexp<'a> {
                                 Action::Insert(x.as_str().to_owned(), Vec::new(), e.to_expr()?),
                             ),
                         ]),
-                        _ => Err(format!("expected `define` command, found {slice}")),
+                        _ => Err(format!("expected `let` command, found {slice}")),
                     },
                     "rule" => match list.as_slice() {
                         [_, Sexp::List(_, patterns), Sexp::List(..)] => {
