@@ -83,15 +83,19 @@ impl<'a> Database<'a> {
         fixpoint(iterations, || {
             self.funcs.values_mut().for_each(Table::iteration_start);
             let mut changed = false;
-            for (query, actions) in &self.rules {
-                let bindings: Vec<Vars> = query.run(&self.funcs, true).collect::<Result<_, _>>()?;
+            let bindings: Vec<Vec<Vars>> = self
+                .rules
+                .iter()
+                .map(|(query, _)| query.run(&self.funcs, true).collect::<Result<_, _>>())
+                .collect::<Result<_, _>>()?;
+            for (bindings, (_, actions)) in bindings.into_iter().zip(&self.rules) {
                 for vars in bindings {
                     for action in actions {
                         changed |= run_action(action, &vars, &mut self.funcs, &mut self.sorts)?;
                     }
                 }
-                rebuild(&mut self.funcs, &mut self.sorts)?;
             }
+            rebuild(&mut self.funcs, &mut self.sorts)?;
             Ok(changed)
         })
     }
