@@ -11,6 +11,7 @@ pub struct Source {
 }
 
 /// A slice of a `Source` string.
+#[derive(Clone)]
 pub struct Slice<'a> {
     /// The `Source` that this slice comes from.
     pub source: &'a Source,
@@ -374,11 +375,7 @@ impl<'a> Sexp<'a> {
                     "let" => match list.as_slice() {
                         [_, Sexp::Atom(x), e] => Ok(vec![
                             Command::Function(
-                                // manual clone
-                                Slice {
-                                    source: slice.source,
-                                    range: slice.range.start..slice.range.end,
-                                },
+                                slice.clone(),
                                 x.as_str().to_owned(),
                                 Vec::new(),
                                 e.to_expr()?.get_type(funcs)?,
