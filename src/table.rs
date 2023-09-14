@@ -86,8 +86,13 @@ impl Table {
                 1 => Some(v.clone()),
                 _ => unreachable!(),
             });
-            if let Some(set) = self.indices.get_mut(&row.collect::<Vec<_>>()) {
-                set.remove(&id);
+            let row: Vec<_> = row.collect();
+            let Some(set) = self.indices.get_mut(&row) else {
+                unreachable!()
+            };
+            set.remove(&id);
+            if set.is_empty() {
+                self.indices.remove(&row);
             }
         }
     }
@@ -151,8 +156,8 @@ impl Table {
                     _ => return Err(format!("{old} != {new} in {}", self.name)),
                 },
             };
-            if old == new && !changed {
-                return Ok(false);
+            if old == new {
+                return Ok(changed);
             }
             self.remove_row(id);
         }
