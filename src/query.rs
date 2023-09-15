@@ -312,33 +312,17 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
     /// Get the current values map up to and including `height`.
     fn values(&mut self, height: usize) -> Result<Option<Values>, String> {
-        let mut values = if height == 0 {
-            HashMap::new()
-        } else if let Some(values) = self.values(height - 1)? {
-            values
-        } else {
-            return Ok(None);
-        };
-
         if let Some(result) = self.trie[height].iterator.peek() {
-            for (&class, value) in result.as_ref()? {
-                values.insert(class, value.clone());
-            }
-            Ok(Some(values))
-        } else if let Some(vs) = self.advance(height)? {
-            for (class, value) in vs {
-                values.insert(class, value);
-            }
-            Ok(Some(values))
+            Ok(Some(result.as_ref()?.clone()))
         } else {
-            Ok(None)
+            self.advance(height)
         }
     }
 
     /// Advance the lazy trie up to `height` to the next value.
     fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if self.trie[height].iterator.next().is_some() {
-            self.values(height)
+        if let Some(values) = self.trie[height].iterator.next() {
+            Ok(Some(values?))
         } else if height == 0 {
             Ok(None)
         } else if let Some(values) = self.advance(height - 1)? {
@@ -426,18 +410,17 @@ impl<'a, 'b> Bindings<'a, 'b> {
                 Err(e) => Some(Err(e)),
                 Ok(map) => {
                     let mut values = values.clone();
-                    if map.iter().all(|(class, value)| {
+                    for (class, value) in &map {
                         if let Some(v) = values.get(class) {
-                            v == value
+                            if v != value {
+                                return None;
+                            }
                         } else {
-                            values.insert(*class, value.clone());
-                            true
+                            let old = values.insert(*class, value.clone());
+                            assert!(old.is_none());
                         }
-                    }) {
-                        Some(Ok(map))
-                    } else {
-                        None
                     }
+                    Some(Ok(values))
                 }
             },
         ));
