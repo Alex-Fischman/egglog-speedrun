@@ -60,15 +60,6 @@ impl<'a, V> UnionFind<'a, V> {
         }
     }
 
-    /// Get the value associated with the given key.
-    pub fn find_value(&mut self, key: usize) -> &V {
-        let root = self.find(key);
-        match &self.trees[root] {
-            Node::Root(v, _) => v,
-            Node::Child(_) => unreachable!(), // root must be a root!
-        }
-    }
-
     /// Union the sets that the given keys belong to, erroring if the merge function errors.
     /// Returns the new root, as well as whether the `UnionFind` was changed or not.
     pub fn union(&mut self, a: usize, b: usize) -> Result<(usize, bool), String> {
@@ -106,19 +97,6 @@ impl<'a, V> UnionFind<'a, V> {
                 Ok((a, true))
             }
         }
-    }
-
-    /// Merge a new value into an existing set without creating a new key.
-    pub fn merge(&mut self, key: usize, x: V) -> Result<(), String> {
-        // See comments for `Database::union` on why we do it this way.
-        let root = self.find(key);
-        let y = std::mem::replace(&mut self.trees[root], Node::Child(0));
-        let (z, r) = match y {
-            Node::Root(y, r) => ((self.merge)(x, y)?, r),
-            Node::Child(_) => unreachable!(),
-        };
-        self.trees[root] = Node::Root(z, r);
-        Ok(())
     }
 
     /// Get all of the keys in this `UnionFind`.
