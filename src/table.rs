@@ -77,20 +77,25 @@ impl Table {
         }
     }
 
+    /// Get all of the index keys associated with a row.
+    fn index_rows(row: &[Value]) -> impl Iterator<Item = Vec<Option<Value>>> + '_ {
+        (0..2_usize.pow(u32::try_from(row.len()).unwrap())).map(|i| {
+            row.iter()
+                .enumerate()
+                .map(|(j, v)| match (i >> j) & 1 {
+                    0 => None,
+                    1 => Some(v.clone()),
+                    _ => unreachable!(),
+                })
+                .collect()
+        })
+    }
+
     /// Removes a row from all indices so it can't be referenced except by `RowId`.
     fn remove_row(&mut self, id: RowId) {
-        let row = get_row(&self.data, &self.schema, id);
-        for i in 0..2_usize.pow(u32::try_from(row.len()).unwrap()) {
-            let row = row.iter().enumerate().map(|(j, v)| match (i >> j) & 1 {
-                0 => None,
-                1 => Some(v.clone()),
-                _ => unreachable!(),
-            });
-            let row: Vec<_> = row.collect();
-            let Some(set) = self.indices.get_mut(&row) else {
-                unreachable!()
-            };
-            assert!(set.remove(&id));
+        for row in Table::index_rows(get_row(&self.data, &self.schema, id)) {
+            let set = self.indices.get_mut(&row).unwrap();
+            set.remove(&id);
             if set.is_empty() {
                 self.indices.remove(&row);
             }
@@ -164,13 +169,8 @@ impl Table {
 
         // Append the new row
         let id = RowId(self.height());
-        for i in 0..2_usize.pow(u32::try_from(row.len()).unwrap()) {
-            let row = row.iter().enumerate().map(|(j, v)| match (i >> j) & 1 {
-                0 => None,
-                1 => Some(v.clone()),
-                _ => unreachable!(),
-            });
-            self.indices.entry(row.collect()).or_default().insert(id);
+        for row in Table::index_rows(&row) {
+            self.indices.entry(row).or_default().insert(id);
         }
         self.data.append(&mut row);
         Ok(true)
