@@ -190,12 +190,27 @@ impl Query<'_> {
             ))
         };
 
-        iterations.flat_map(move |iteration| Bindings {
-            query: self,
-            funcs,
-            iteration,
-            todo: constraints.clone(),
-            trie: Vec::new(),
+        iterations.flat_map(move |iteration| -> Box<dyn Iterator<Item = _>> {
+            let mut bindings = Bindings {
+                query: self,
+                funcs,
+                iteration,
+                todo: constraints.clone(),
+                trie: Vec::new(),
+            };
+            while !bindings.todo.is_empty() {
+                let values = if bindings.trie.is_empty() {
+                    HashMap::new()
+                } else {
+                    match bindings.advance(bindings.trie.len() - 1) {
+                        Ok(Some(values)) => values,
+                        Ok(None) => return Box::new(empty()),
+                        Err(e) => return Box::new(once(Err(e))),
+                    }
+                };
+                bindings.build(bindings.trie.len(), values);
+            }
+            Box::new(bindings)
         })
     }
 }
@@ -272,7 +287,7 @@ pub struct Bindings<'a, 'b> {
 
 struct Layer<'b> {
     constraint: Option<Constraint>,
-    iterator: Peekable<Box<dyn Iterator<Item = Result<Values, String>> + 'b>>,
+    iterator: Box<dyn Iterator<Item = Result<Values, String>> + 'b>,
 }
 
 type Values = HashMap<usize, Value>;
@@ -310,16 +325,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
             .collect()
     }
 
-    /// Get the current values map up to and including `height`.
-    fn values(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if let Some(result) = self.trie[height].iterator.peek() {
-            Ok(Some(result.as_ref()?.clone()))
-        } else {
-            self.advance(height)
-        }
-    }
-
-    /// Advance the lazy trie up to `height` to the next value.
+    /// Advance the lazy trie layer at `height` to the next value and return it.
     fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
         if let Some(values) = self.trie[height].iterator.next() {
             Ok(Some(values?))
@@ -327,35 +333,35 @@ impl<'a, 'b> Bindings<'a, 'b> {
             Ok(None)
         } else if let Some(values) = self.advance(height - 1)? {
             self.build(height, values);
-            self.values(height)
+            self.advance(height)
         } else {
             Ok(None)
         }
     }
 
     /// Build a single layer of the trie.
-    fn build(&mut self, height: usize, values: Values) {
+    fn build(&mut self, height: usize, prev: Values) {
         self.todo
             .extend(self.trie.drain(height..).filter_map(|mut l| {
-                assert!(l.iterator.peek().is_none());
+                assert!(l.iterator.next().is_none());
                 l.constraint
             }));
 
         assert!(!self.todo.is_empty());
-        let known: HashSet<usize> = values.keys().copied().collect();
+        let known: HashSet<usize> = prev.keys().copied().collect();
         // None: todo, Some(None): pass, Some(Some(i)): remove ith constraint
         let mut next: Option<Option<usize>> = None;
-        let mut iter: Option<Box<dyn Iterator<Item = _>>> = None;
+        let mut iter: Option<Box<dyn Iterator<Item = Result<Vec<_>, _>>>> = None;
 
         // First, try to resolve any expr constraint.
         for (i, constraint) in self.todo.iter().enumerate() {
             if let &Constraint::Expr { class, index } = constraint {
                 if self.query.expr_deps[&(class, index)].is_subset(&known) {
                     let y = self.query.classes[&class].exprs[index]
-                        .evaluate_ref(&self.values_to_vars(&values), self.funcs);
+                        .evaluate_ref(&self.values_to_vars(&prev), self.funcs);
                     next = Some(Some(i));
                     iter = Some(match y {
-                        Ok(Some(v)) => Box::new(once(Ok(HashMap::from([(class, v)])))),
+                        Ok(Some(v)) => Box::new(once(Ok(vec![(class, v)]))),
                         Ok(None) => Box::new(empty()),
                         Err(e) => Box::new(once(Err(e))),
                     });
@@ -372,7 +378,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
                     let row: Vec<_> = xs
                         .iter()
                         .chain([&y])
-                        .map(|c| values.get(c).cloned())
+                        .map(|c| prev.get(c).cloned())
                         .collect();
                     let iteration = self.iteration[&(y, index)];
                     vec.push((
@@ -387,7 +393,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
                 next = Some(Some(i));
                 iter = Some(Box::new(self.funcs[f].rows(&row, iteration).map(
-                    move |vs| Ok(cs.iter().zip(vs).map(|(c, v)| (*c, v.clone())).collect()),
+                    move |vs| Ok(cs.iter().copied().zip(vs.iter().cloned()).collect()),
                 )));
             }
         }
@@ -405,29 +411,27 @@ impl<'a, 'b> Bindings<'a, 'b> {
         }
 
         // Check that none of the iterators values collide with known values
-        let iter: Box<dyn Iterator<Item = _>> = Box::new(iter.unwrap().filter_map(
-            move |result: Result<Values, String>| match result {
-                Err(e) => Some(Err(e)),
-                Ok(map) => {
-                    let mut values = values.clone();
-                    for (class, value) in &map {
-                        if let Some(v) = values.get(class) {
-                            if v != value {
-                                return None;
-                            }
-                        } else {
-                            let old = values.insert(*class, value.clone());
-                            assert!(old.is_none());
+        let iterator = Box::new(iter.unwrap().filter_map(move |result| match result {
+            Err(e) => Some(Err(e)),
+            Ok(curr) => {
+                let mut prev = prev.clone();
+                for (class, value) in &curr {
+                    if let Some(v) = prev.get(class) {
+                        if v != value {
+                            return None;
                         }
+                    } else {
+                        let old = prev.insert(*class, value.clone());
+                        assert!(old.is_none());
                     }
-                    Some(Ok(values))
                 }
-            },
-        ));
+                Some(Ok(prev))
+            }
+        }));
 
         self.trie.push(Layer {
             constraint: next.unwrap().map(|i| self.todo.remove(i)),
-            iterator: iter.peekable(),
+            iterator,
         });
     }
 }
@@ -435,26 +439,7 @@ impl<'a, 'b> Bindings<'a, 'b> {
 impl<'a, 'b> Iterator for Bindings<'a, 'b> {
     type Item = Result<Vars<'a>, String>;
     fn next(&mut self) -> Option<Result<Vars<'a>, String>> {
-        // fun with nesting
-        match if self.trie.is_empty() {
-            let mut i = 0;
-            while !self.todo.is_empty() {
-                let values = if i == 0 {
-                    HashMap::new()
-                } else {
-                    match self.values(i - 1) {
-                        Ok(Some(values)) => values,
-                        Ok(None) => return None,
-                        Err(e) => return Some(Err(e)),
-                    }
-                };
-                self.build(i, values);
-                i += 1;
-            }
-            self.values(self.trie.len() - 1)
-        } else {
-            self.advance(self.trie.len() - 1)
-        } {
+        match self.advance(self.trie.len() - 1) {
             Ok(Some(values)) => Some(Ok(self.values_to_vars(&values))),
             Ok(None) => None,
             Err(e) => Some(Err(e)),
