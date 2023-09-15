@@ -37,7 +37,7 @@ impl Table {
             schema,
             merge,
             data: Vec::new(),
-            indices: HashMap::new(),
+            indices: HashMap::default(),
             empty: BTreeSet::new(),
             prev: RowId(0)..RowId(0),
         }
@@ -147,7 +147,9 @@ impl Table {
             let mut changed = false;
             *new = match &self.merge {
                 Some(expr) => expr.evaluate_mut(
-                    &HashMap::from([("old", old.clone()), ("new", new.clone())]),
+                    &[("old", old.clone()), ("new", new.clone())]
+                        .into_iter()
+                        .collect(),
                     &mut BTreeMap::new(),
                     sorts,
                 )?,

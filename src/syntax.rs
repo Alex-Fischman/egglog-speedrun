@@ -529,7 +529,7 @@ pub fn parse(source: &Source) -> Result<Vec<Command>, String> {
 
     // translate sexps into commands
     let mut commands = Vec::new();
-    let mut funcs = HashMap::new();
+    let mut funcs = HashMap::default();
     for sexp in sexps {
         commands.extend(sexp.to_commands(&funcs)?.into_iter().inspect(|command| {
             if let Command::Function(_, f, _, y, _) = command {

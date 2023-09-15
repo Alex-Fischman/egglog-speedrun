@@ -17,7 +17,8 @@ pub mod table;
 pub mod unionfind;
 
 pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::*};
-pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+pub use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+pub use std::collections::{BTreeMap, BTreeSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
 pub use std::iter::{empty, once, Peekable};
 pub use std::ops::Range;

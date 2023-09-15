@@ -64,7 +64,7 @@ impl Query<'_> {
         }
 
         // Add equality constraints across patterns when names are the same.
-        let mut names_to_keys: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut names_to_keys: HashMap<String, Vec<usize>> = HashMap::default();
         let mut to_union: Vec<(usize, usize)> = Vec::new();
         for (key, class) in eqs.iter() {
             if let Some(name) = &class.name {
@@ -123,7 +123,7 @@ impl Query<'_> {
         let mut expr_deps: BTreeMap<(usize, usize), HashSet<usize>> = BTreeMap::new();
         for (key, class) in &classes {
             for (i, expr) in class.exprs.iter().enumerate() {
-                let mut set = HashSet::new();
+                let mut set = HashSet::default();
                 deps_from_expr(expr, &names_to_keys, &mut set);
                 assert!(expr_deps.insert((*key, i), set).is_none());
             }
@@ -200,7 +200,7 @@ impl Query<'_> {
             };
             while !bindings.todo.is_empty() {
                 let values = if bindings.trie.is_empty() {
-                    HashMap::new()
+                    HashMap::default()
                 } else {
                     match bindings.advance(bindings.trie.len() - 1) {
                         Ok(Some(values)) => values,

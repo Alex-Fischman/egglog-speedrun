@@ -64,7 +64,12 @@ impl<'a> Database<'a> {
 
     /// Run an action to this `Database`.
     pub fn action(&mut self, action: &Action) -> Result<&mut Database<'a>, String> {
-        run_action(action, &HashMap::new(), &mut self.funcs, &mut self.sorts)?;
+        run_action(
+            action,
+            &HashMap::default(),
+            &mut self.funcs,
+            &mut self.sorts,
+        )?;
         rebuild(&mut self.funcs, &mut self.sorts)?;
         Ok(self)
     }
