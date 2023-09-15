@@ -90,7 +90,7 @@ impl Table {
             let Some(set) = self.indices.get_mut(&row) else {
                 unreachable!()
             };
-            set.remove(&id);
+            assert!(set.remove(&id));
             if set.is_empty() {
                 self.indices.remove(&row);
             }
@@ -230,20 +230,23 @@ impl Table {
             }
         }
         for id in ids {
-            self.remove_row(id);
-            self.insert(
-                get_row(&self.data, &self.schema, id)
-                    .iter()
-                    .zip(&self.schema)
-                    .map(|(v, t)| match (v, t) {
-                        (Value::Sort(v), Type::Sort(s)) => {
-                            Value::Sort(sorts.get_mut(s).unwrap().find(*v))
-                        }
-                        _ => v.clone(),
-                    })
-                    .collect(),
-                sorts,
-            )?;
+            // We need an if statement here because previous inserts could have removed id
+            if self.get_ids(&row).contains(&id) {
+                self.remove_row(id);
+                self.insert(
+                    get_row(&self.data, &self.schema, id)
+                        .iter()
+                        .zip(&self.schema)
+                        .map(|(v, t)| match (v, t) {
+                            (Value::Sort(v), Type::Sort(s)) => {
+                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
+                            }
+                            _ => v.clone(),
+                        })
+                        .collect(),
+                    sorts,
+                )?;
+            }
         }
         Ok(())
     }
