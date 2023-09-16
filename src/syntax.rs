@@ -315,8 +315,9 @@ impl<'a> Sexp<'a> {
                                         return Err(format!("unknown option {slice}"))
                                     }
                                 };
-                                let value =
-                                    option.get(1).ok_or(format!("missing value for {slice}"))?;
+                                let value = option
+                                    .get(1)
+                                    .ok_or_else(|| format!("missing value for {slice}"))?;
                                 match key.as_str() {
                                     ":merge" => merge = Some(value.to_expr()?),
                                     _ => return Err(format!("unknown option {key}")),
@@ -550,7 +551,10 @@ impl Expr {
             Expr::Var(_) => Err(format!("unknown type for {self}")),
             Expr::Call(f, _) => match f.as_str() {
                 "+" | "*" | "min" => Ok(Type::Int),
-                _ => Ok(funcs.get(f).ok_or(format!("unknown function {f}"))?.clone()),
+                _ => Ok(funcs
+                    .get(f)
+                    .ok_or_else(|| format!("unknown function {f}"))?
+                    .clone()),
             },
         }
     }

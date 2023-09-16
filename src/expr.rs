@@ -105,7 +105,7 @@ impl Expr {
                 None => None,
             })
         })?
-        .ok_or(format!("unknown value {self}"))
+        .ok_or_else(|| format!("unknown value {self}"))
     }
 
     /// Get a `Value` from an `Expr` under a given context, without modifying the database.
@@ -150,7 +150,7 @@ impl Expr {
                     match ints(xs)?
                         .into_iter()
                         .reduce(|a, b| Some(a?.min(b?)))
-                        .ok_or(format!("need at least one argument for {self}"))?
+                        .ok_or_else(|| format!("need at least one argument for {self}"))?
                     {
                         Some(i) => Ok(Some(Value::Int(i))),
                         None => Ok(None),
@@ -162,7 +162,7 @@ impl Expr {
                         .map(|x| x.evaluate_private(vars, funcs))
                         .collect::<Result<_, _>>()?;
                     match xs {
-                        Some(xs) => funcs(f, xs)?.ok_or(format!("unknown function {self}")),
+                        Some(xs) => funcs(f, xs)?.ok_or_else(|| format!("unknown function {self}")),
                         None => Ok(None),
                     }
                 }

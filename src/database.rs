@@ -138,7 +138,7 @@ fn run_action(
                 .collect::<Result<Vec<_>, _>>()?;
             funcs
                 .get_mut(f.as_str())
-                .ok_or(format!("unknown function {f}"))?
+                .ok_or_else(|| format!("unknown function {f}"))?
                 .insert(row, sorts)?
         }
         Action::GetMut(f, xs) => {
@@ -148,7 +148,7 @@ fn run_action(
                 .collect::<Result<Vec<_>, _>>()?;
             funcs
                 .get_mut(f.as_str())
-                .ok_or(format!("unknown function {f}"))?
+                .ok_or_else(|| format!("unknown function {f}"))?
                 .get_mut(xs, sorts)?
                 .1
         }
