@@ -169,7 +169,7 @@ impl Query<'_> {
 
         let iterations: Box<dyn Iterator<Item = _>> = if seminaive {
             Box::new(
-                (1..2_usize.pow(u32::try_from(call_order.len()).unwrap())).map(move |i| {
+                (1..2_usize.pow(call_order.len().try_into().unwrap())).map(move |i| {
                     call_order
                         .iter()
                         .enumerate()

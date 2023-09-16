@@ -409,7 +409,7 @@ impl<'a> Sexp<'a> {
                         [_, a, b] => {
                             // This is slightly hacky, but we use a variable name with
                             // a space in it to make sure there are never any conflicts.
-                            let x = Expr::Var(String::from(" _"));
+                            let x = Expr::Var(" _".to_owned());
                             let (a, b) = (a.to_expr()?, b.to_expr()?);
                             let ((Ok(Type::Sort(s)), _) | (_, Ok(Type::Sort(s)))) =
                                 (a.get_type(funcs), b.get_type(funcs))

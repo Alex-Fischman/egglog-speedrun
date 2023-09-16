@@ -76,7 +76,7 @@ impl Table {
 
     /// Get all of the index keys associated with a row.
     fn index_rows(row: &[Value]) -> impl Iterator<Item = Vec<Option<Value>>> + '_ {
-        (0..2_usize.pow(u32::try_from(row.len()).unwrap())).map(|i| {
+        (0..2_usize.pow(row.len().try_into().unwrap())).map(|i| {
             row.iter()
                 .enumerate()
                 .map(|(j, v)| match (i >> j) & 1 {
