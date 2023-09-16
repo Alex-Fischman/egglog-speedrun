@@ -17,7 +17,7 @@ pub struct Table {
     /// A default set to return a reference to.
     empty: BTreeSet<RowId>,
     /// The rows that were added in the last iteration.
-    prev: Range<RowId>,
+    prev: std::ops::Range<RowId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

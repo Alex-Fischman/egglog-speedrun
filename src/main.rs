@@ -21,8 +21,7 @@ pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::
 pub use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 pub use std::collections::{BTreeMap, BTreeSet};
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
-pub use std::iter::{empty, once, Peekable};
-pub use std::ops::Range;
+pub use std::iter::{empty, once};
 
 fn main() {
     match run() {
