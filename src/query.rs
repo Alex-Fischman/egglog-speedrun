@@ -327,15 +327,16 @@ impl<'a, 'b> Bindings<'a, 'b> {
 
     /// Advance the lazy trie layer at `height` to the next value and return it.
     fn advance(&mut self, height: usize) -> Result<Option<Values>, String> {
-        if let Some(values) = self.trie[height].iterator.next() {
-            Ok(Some(values?))
-        } else if height == 0 {
-            Ok(None)
-        } else if let Some(values) = self.advance(height - 1)? {
-            self.build(height, values);
-            self.advance(height)
-        } else {
-            Ok(None)
+        loop {
+            if let Some(values) = self.trie[height].iterator.next() {
+                return Ok(Some(values?));
+            } else if height == 0 {
+                return Ok(None);
+            } else if let Some(values) = self.advance(height - 1)? {
+                self.build(height, values);
+            } else {
+                return Ok(None);
+            }
         }
     }
 
