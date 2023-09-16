@@ -8,6 +8,7 @@
 #![allow(clippy::similar_names)]
 #![allow(clippy::many_single_char_names)]
 #![allow(clippy::too_many_lines)]
+#![allow(clippy::must_use_candidate)]
 
 pub mod database;
 pub mod expr;

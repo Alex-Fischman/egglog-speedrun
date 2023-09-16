@@ -30,7 +30,6 @@ fn get_row<'a>(data: &'a [Value], schema: &[Type], id: RowId) -> &'a [Value] {
 
 impl Table {
     /// Create a new `Table` with the given schema.
-    #[must_use]
     pub fn new(name: String, schema: Vec<Type>, merge: Option<Expr>) -> Table {
         Table {
             name,
@@ -44,7 +43,6 @@ impl Table {
     }
 
     /// Get the number of columns in this table.
-    #[must_use]
     pub fn width(&self) -> usize {
         self.schema.len()
     }
@@ -55,7 +53,6 @@ impl Table {
     }
 
     /// Get the number of live rows in this table.
-    #[must_use]
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.get_ids(&vec![None; self.width()]).len()
@@ -201,7 +198,6 @@ impl Table {
 
     /// Get the output in this table with the specific inputs in the input columns.
     /// This method never changes `self`; notably, it will not create new sort elements.
-    #[must_use]
     pub fn get_ref(&self, xs: &[Value]) -> Option<Value> {
         assert_eq!(self.width() - 1, xs.len());
         self.get_id(xs).map(|id| {

@@ -20,7 +20,6 @@ pub struct Slice<'a> {
 
 impl Slice<'_> {
     /// Get the string slice that this slice holds.
-    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.source.text[self.range.clone()]
     }
