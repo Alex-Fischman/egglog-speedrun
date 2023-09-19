@@ -71,26 +71,26 @@ impl<'a, V> UnionFind<'a, V> {
 
         // We want to move x and y into self.merge, so we swap them with a default value.
         // This is okay since we're about to replace them. (Luckily we have a default!)
-        let x = std::mem::replace(&mut self.trees[a], Node::Child(0));
-        let y = std::mem::replace(&mut self.trees[b], Node::Child(0));
+        let x = replace(&mut self.trees[a], Node::Child(0));
+        let y = replace(&mut self.trees[b], Node::Child(0));
         let (z, p, q) = match (x, y) {
             (Node::Root(x, p), Node::Root(y, q)) => ((self.merge)(x, y)?, p, q),
             _ => unreachable!(), // a and b are both roots!
         };
         match p.cmp(&q) {
-            std::cmp::Ordering::Less => {
+            Ordering::Less => {
                 self.trees[a] = Node::Child(b);
                 self.trees[b] = Node::Root(z, q);
                 self.dirty.insert(a);
                 Ok((b, true))
             }
-            std::cmp::Ordering::Greater => {
+            Ordering::Greater => {
                 self.trees[a] = Node::Root(z, p);
                 self.trees[b] = Node::Child(a);
                 self.dirty.insert(b);
                 Ok((a, true))
             }
-            std::cmp::Ordering::Equal => {
+            Ordering::Equal => {
                 self.trees[a] = Node::Root(z, p + 1);
                 self.trees[b] = Node::Child(a);
                 self.dirty.insert(b);
@@ -115,7 +115,7 @@ impl<'a, V> UnionFind<'a, V> {
     /// Get all of the keys that used to be canonical but aren't anymore,
     /// since the last time this function was called.
     pub fn dirty(&mut self) -> HashSet<usize> {
-        std::mem::take(&mut self.dirty)
+        take(&mut self.dirty)
     }
 }
 
@@ -138,10 +138,7 @@ impl<V> IntoIterator for UnionFind<'_, V> {
 /// An iterator over the canonical keys and values of a `UnionFind`.
 // We could inline this, but we use it to hide the private `Node` type.
 pub struct Canonical<V>(
-    std::iter::FilterMap<
-        std::iter::Enumerate<std::vec::IntoIter<Node<V>>>,
-        fn((usize, Node<V>)) -> Option<(usize, V)>,
-    >,
+    FilterMap<Enumerate<IntoIter<Node<V>>>, fn((usize, Node<V>)) -> Option<(usize, V)>>,
 );
 
 impl<V> Iterator for Canonical<V> {

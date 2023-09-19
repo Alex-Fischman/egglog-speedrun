@@ -19,9 +19,16 @@ pub mod unionfind;
 
 pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::*};
 pub use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+pub use std::cmp::Ordering;
 pub use std::collections::{BTreeMap, BTreeSet};
+pub use std::env::args;
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
-pub use std::iter::{empty, once};
+pub use std::fs::read_to_string;
+pub use std::iter::{empty, once, Enumerate, FilterMap, Peekable};
+pub use std::mem::{replace, size_of, take};
+pub use std::ops::Range;
+pub use std::time::Instant;
+pub use std::vec::IntoIter;
 
 fn main() {
     match run() {
@@ -31,12 +38,11 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let args = std::env::args().collect::<Vec<String>>();
+    let args = args().collect::<Vec<String>>();
     let name = args.get(1).ok_or("usage: pass an egglog file")?.clone();
-    let text = std::fs::read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
-    let source = std::rc::Rc::new(Source { name, text });
-
-    let start = std::time::Instant::now();
+    let text = read_to_string(&name).map_err(|_| format!("could not read {name}"))?;
+    let source = Source { name, text };
+    let start = Instant::now();
 
     let commands = parse(&source)?;
     let mut database = Database::default();

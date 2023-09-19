@@ -451,7 +451,7 @@ impl<'a, 'b> Iterator for Bindings<'a, 'b> {
 /// Goes through the iterators and iterates each one until one of the iterators runs out.
 /// then returns the data associated with that iterator and its length. Do not rely on
 /// the state of the iterators after this function is finished.
-fn pick_shortest<T, I: Iterator>(vec: &mut Vec<(T, std::iter::Peekable<I>)>) -> Option<T> {
+fn pick_shortest<T, I: Iterator>(vec: &mut Vec<(T, Peekable<I>)>) -> Option<T> {
     if vec.is_empty() {
         None
     } else {

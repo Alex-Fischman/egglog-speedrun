@@ -15,7 +15,7 @@ pub struct Source {
 pub struct Slice<'a> {
     /// The `Source` that this slice comes from.
     pub source: &'a Source,
-    range: std::ops::Range<usize>,
+    range: Range<usize>,
 }
 
 impl Slice<'_> {
@@ -176,9 +176,7 @@ impl Display for Command<'_> {
 
 impl<'a> Sexp<'a> {
     /// Should never be empty.
-    fn parse(
-        slices: &mut std::iter::Peekable<impl Iterator<Item = Slice<'a>>>,
-    ) -> Result<Sexp<'a>, String> {
+    fn parse(slices: &mut Peekable<impl Iterator<Item = Slice<'a>>>) -> Result<Sexp<'a>, String> {
         let slice = slices.next().unwrap();
         match slice.as_str() {
             ")" => Err(format!("extra {slice}")),
