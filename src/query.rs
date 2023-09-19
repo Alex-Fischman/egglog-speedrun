@@ -372,30 +372,48 @@ impl<'a, 'b> Bindings<'a, 'b> {
         }
         if next.is_none() {
             // Then, try to resolve the shortest row constriant.
-            let mut vec = Vec::new();
+            let mut vec: Vec<(_, Peekable<Box<dyn Iterator<Item = _>>>)> = Vec::new();
             for (i, constraint) in self.todo.iter().enumerate() {
                 if let &Constraint::Row { y, index } = constraint {
                     let (f, xs) = &self.query.classes[&y].calls[index];
-                    let row: Vec<_> = xs
-                        .iter()
-                        .chain([&y])
-                        .map(|c| prev.get(c).cloned())
-                        .collect();
                     let iteration = self.iteration[&(y, index)];
-                    vec.push((
-                        (i, f, xs, y, row.clone(), iteration),
-                        self.funcs[f].rows(&row, iteration).peekable(),
-                    ));
+                    let mut in_vec = false;
+                    for (c, x) in xs.iter().chain([&y]).enumerate() {
+                        if let Some(v) = prev.get(x) {
+                            in_vec = true;
+                            vec.push((
+                                (i, f, xs, y, iteration, Some((v, c))),
+                                (Box::new(self.funcs[f].rows_with_value(iteration, v, c))
+                                    as Box<dyn Iterator<Item = _>>)
+                                    .peekable(),
+                            ));
+                        }
+                    }
+                    // Any column index must be shorter than the whole table
+                    if !in_vec {
+                        vec.push((
+                            (i, f, xs, y, iteration, None),
+                            (Box::new(self.funcs[f].rows(iteration))
+                                as Box<dyn Iterator<Item = _>>)
+                                .peekable(),
+                        ));
+                    }
                 }
             }
-            if let Some((i, f, xs, y, row, iteration)) = pick_shortest(&mut vec) {
+            if let Some((i, f, xs, y, iteration, option)) = pick_shortest(&mut vec) {
                 let mut cs = xs.clone();
                 cs.push(y);
+                let zip_row =
+                    move |vs: &[Value]| Ok(cs.iter().copied().zip(vs.iter().cloned()).collect());
 
                 next = Some(Some(i));
-                iter = Some(Box::new(self.funcs[f].rows(&row, iteration).map(
-                    move |vs| Ok(cs.iter().copied().zip(vs.iter().cloned()).collect()),
-                )));
+                iter = if let Some((v, c)) = option {
+                    Some(Box::new(
+                        self.funcs[f].rows_with_value(iteration, v, c).map(zip_row),
+                    ))
+                } else {
+                    Some(Box::new(self.funcs[f].rows(iteration).map(zip_row)))
+                };
             }
         }
         if next.is_none() {

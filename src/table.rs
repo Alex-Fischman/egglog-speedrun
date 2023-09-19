@@ -14,8 +14,10 @@ pub struct Table {
     data: Vec<Value>,
     /// The set of all live rows.
     live: BitVec,
-    /// The indices into the data for this table. None means don't care.
-    indices: HashMap<Vec<Option<Value>>, Vec<RowId>>,
+    /// The functional index, over all input columns. Contains dead rows.
+    function: HashMap<Vec<Value>, RowId>,
+    /// The column indices, over each column. Contains dead rows.
+    columns: Vec<HashMap<Value, Vec<RowId>>>,
     /// The rows that were added in the last iteration.
     prev: Range<RowId>,
 }
@@ -32,24 +34,20 @@ impl Table {
     /// Create a new `Table` with the given schema.
     pub fn new(name: String, schema: Vec<Type>, merge: Option<Expr>) -> Table {
         Table {
+            columns: vec![HashMap::default(); schema.len()],
             name,
             schema,
             merge,
             data: Vec::new(),
             live: BitVec::default(),
-            indices: HashMap::default(),
+            function: HashMap::default(),
             prev: RowId(0)..RowId(0),
         }
     }
 
-    /// Get the number of columns in this table.
-    pub fn width(&self) -> usize {
-        self.schema.len()
-    }
-
     /// Get the number of rows in this table.
     fn height(&self) -> usize {
-        self.data.len() / self.width()
+        self.data.len() / self.schema.len()
     }
 
     /// Get the number of live rows in this table.
@@ -60,39 +58,6 @@ impl Table {
             .iter()
             .map(|bits| bits.count_ones() as usize)
             .sum()
-    }
-
-    /// Get all the `RowId`s corresponding to the given values.
-    fn get_ids<'a>(&'a self, row: &[Option<Value>]) -> impl Iterator<Item = RowId> + 'a {
-        self.indices
-            .get(row)
-            .map_or([].as_slice(), Vec::as_slice)
-            .iter()
-            .copied()
-            .filter(|&id| self.live.get(id))
-    }
-
-    /// Get the `RowId` corresponding to the given inputs.
-    fn get_id(&self, xs: &[Value]) -> Option<RowId> {
-        let row: Vec<_> = xs.iter().cloned().map(Option::Some).chain([None]).collect();
-        let mut ids = self.get_ids(&row);
-        let out = ids.next();
-        assert!(ids.next().is_none());
-        out
-    }
-
-    /// Get all of the index keys associated with a row.
-    fn index_rows(row: &[Value]) -> impl Iterator<Item = Vec<Option<Value>>> + '_ {
-        (0..2_usize.pow(row.len().try_into().unwrap())).map(|i| {
-            row.iter()
-                .enumerate()
-                .map(|(j, v)| match (i >> j) & 1 {
-                    0 => None,
-                    1 => Some(v.clone()),
-                    _ => unreachable!(),
-                })
-                .collect()
-        })
     }
 
     /// This function advances the iteration pointers for semi-naive.
@@ -134,7 +99,7 @@ impl Table {
         }
 
         // If there's a conflict, remove the old row
-        if let Some(id) = self.get_id(&row[..row.len() - 1]) {
+        if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
             if self.live.get(id) {
                 let old = get_row(&self.data, &self.schema, id).last().unwrap();
                 let new = row.last_mut().unwrap();
@@ -167,8 +132,12 @@ impl Table {
         // Append the new row
         let id = RowId(self.height());
         self.live.set(id, true);
-        for row in Table::index_rows(&row) {
-            self.indices.entry(row).or_default().push(id);
+        self.function.insert(row[..row.len() - 1].to_vec(), id);
+        for (column, value) in row.iter().enumerate() {
+            self.columns[column]
+                .entry(value.clone())
+                .or_default()
+                .push(id);
         }
         self.data.append(&mut row);
         Ok(true)
@@ -198,8 +167,8 @@ impl Table {
     /// Get the output in this table with the specific inputs in the input columns.
     /// This method never changes `self`; notably, it will not create new sort elements.
     pub fn get_ref(&self, xs: &[Value]) -> Option<Value> {
-        assert_eq!(self.width() - 1, xs.len());
-        self.get_id(xs).map(|id| {
+        assert_eq!(self.schema.len() - 1, xs.len());
+        self.function.get(xs).map(|&id| {
             get_row(&self.data, &self.schema, id)
                 .last()
                 .unwrap()
@@ -216,13 +185,12 @@ impl Table {
     ) -> Result<(), String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
         let mut ids: BTreeSet<RowId> = BTreeSet::new();
-        let mut row = vec![None; self.width()];
         for (column, sort) in self.schema.iter().enumerate() {
             if let Type::Sort(sort) = sort {
                 for value in &dirty[sort] {
-                    row[column] = Some(Value::Sort(*value));
-                    ids.extend(self.get_ids(&row));
-                    row[column] = None;
+                    if let Some(vec) = self.columns[column].get(&Value::Sort(*value)) {
+                        ids.extend(vec);
+                    }
                 }
             }
         }
@@ -248,15 +216,36 @@ impl Table {
         Ok(())
     }
 
-    /// Get the set of rows with specific values in specific columns. `None` means "don't care".
-    pub fn rows(&self, row: &[Option<Value>], i: Iteration) -> impl Iterator<Item = &[Value]> {
-        assert_eq!(self.width(), row.len());
-        let range = match i {
+    fn range(&self, i: Iteration) -> Range<RowId> {
+        match i {
             Iteration::Past => RowId(0)..self.prev.start,
             Iteration::Prev => self.prev.clone(),
             Iteration::All => RowId(0)..RowId(self.height()),
-        };
-        self.get_ids(row)
+        }
+    }
+
+    /// Get all the live rows from an iteration.
+    pub fn rows(&self, i: Iteration) -> impl Iterator<Item = &[Value]> {
+        let range = self.range(i);
+        (range.start.0..range.end.0)
+            .map(RowId) // Step is unstable
+            .filter(|&id| self.live.get(id))
+            .map(|id| get_row(&self.data, &self.schema, id))
+    }
+
+    /// Get the live rows with a specific value in a specific column from an iteration.
+    pub fn rows_with_value(
+        &self,
+        i: Iteration,
+        value: &Value,
+        column: usize,
+    ) -> impl Iterator<Item = &[Value]> {
+        let range = self.range(i);
+        self.columns[column]
+            .get(value)
+            .into_iter()
+            .flatten()
+            .copied()
             .filter(move |&id| self.live.get(id) && range.contains(&id))
             .map(|id| get_row(&self.data, &self.schema, id))
     }
