@@ -184,7 +184,7 @@ impl Table {
         dirty: &HashMap<String, HashSet<usize>>,
     ) -> Result<(), String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
-        let mut ids: BTreeSet<RowId> = BTreeSet::new();
+        let mut ids: Vec<RowId> = Vec::new();
         for (column, sort) in self.schema.iter().enumerate() {
             if let Type::Sort(sort) = sort {
                 for value in &dirty[sort] {
