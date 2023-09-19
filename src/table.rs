@@ -12,12 +12,12 @@ pub struct Table {
     merge: Option<Expr>,
     /// The data in this table, stored row-wise and indexed by `RowId`s.
     data: Vec<Value>,
+    /// The set of all live rows.
+    live: BitVec,
     /// The indices into the data for this table. None means don't care.
-    indices: HashMap<Vec<Option<Value>>, BTreeSet<RowId>>,
-    /// A default set to return a reference to.
-    empty: BTreeSet<RowId>,
+    indices: HashMap<Vec<Option<Value>>, Vec<RowId>>,
     /// The rows that were added in the last iteration.
-    prev: std::ops::Range<RowId>,
+    prev: Range<RowId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -36,8 +36,8 @@ impl Table {
             schema,
             merge,
             data: Vec::new(),
+            live: BitVec::default(),
             indices: HashMap::default(),
-            empty: BTreeSet::new(),
             prev: RowId(0)..RowId(0),
         }
     }
@@ -55,23 +55,30 @@ impl Table {
     /// Get the number of live rows in this table.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.get_ids(&vec![None; self.width()]).len()
+        self.live
+            .0
+            .iter()
+            .map(|bits| bits.count_ones() as usize)
+            .sum()
     }
 
     /// Get all the `RowId`s corresponding to the given values.
-    fn get_ids(&self, row: &[Option<Value>]) -> &BTreeSet<RowId> {
-        self.indices.get(row).unwrap_or(&self.empty)
+    fn get_ids<'a>(&'a self, row: &[Option<Value>]) -> impl Iterator<Item = RowId> + 'a {
+        self.indices
+            .get(row)
+            .map_or([].as_slice(), Vec::as_slice)
+            .iter()
+            .copied()
+            .filter(|&id| self.live.get(id))
     }
 
     /// Get the `RowId` corresponding to the given inputs.
     fn get_id(&self, xs: &[Value]) -> Option<RowId> {
         let row: Vec<_> = xs.iter().cloned().map(Option::Some).chain([None]).collect();
-        let ids = self.get_ids(&row);
-        match ids.len() {
-            0 => None,
-            1 => Some(*ids.iter().next().unwrap()),
-            _ => unreachable!(),
-        }
+        let mut ids = self.get_ids(&row);
+        let out = ids.next();
+        assert!(ids.next().is_none());
+        out
     }
 
     /// Get all of the index keys associated with a row.
@@ -86,17 +93,6 @@ impl Table {
                 })
                 .collect()
         })
-    }
-
-    /// Removes a row from all indices so it can't be referenced except by `RowId`.
-    fn remove_row(&mut self, id: RowId) {
-        for row in Table::index_rows(get_row(&self.data, &self.schema, id)) {
-            let set = self.indices.get_mut(&row).unwrap();
-            set.remove(&id);
-            if set.is_empty() {
-                self.indices.remove(&row);
-            }
-        }
     }
 
     /// This function advances the iteration pointers for semi-naive.
@@ -139,37 +135,40 @@ impl Table {
 
         // If there's a conflict, remove the old row
         if let Some(id) = self.get_id(&row[..row.len() - 1]) {
-            let old = get_row(&self.data, &self.schema, id).last().unwrap();
-            let new = row.last_mut().unwrap();
-            let mut changed = false;
-            *new = match &self.merge {
-                Some(expr) => expr.evaluate_mut(
-                    &[("old", old.clone()), ("new", new.clone())]
-                        .into_iter()
-                        .collect(),
-                    &mut BTreeMap::new(),
-                    sorts,
-                )?,
-                None if old == new => new.clone(),
-                None => match (old.clone(), new.clone(), self.schema.last().unwrap()) {
-                    (Value::Sort(old), Value::Sort(new), Type::Sort(s)) => {
-                        let (s, c) = sorts.get_mut(s).unwrap().union(old, new)?;
-                        changed |= c;
-                        Value::Sort(s)
-                    }
-                    _ => return Err(format!("{old} != {new} in {}", self.name)),
-                },
-            };
-            if old == new {
-                return Ok(changed);
+            if self.live.get(id) {
+                let old = get_row(&self.data, &self.schema, id).last().unwrap();
+                let new = row.last_mut().unwrap();
+                let mut changed = false;
+                *new = match &self.merge {
+                    Some(expr) => expr.evaluate_mut(
+                        &[("old", old.clone()), ("new", new.clone())]
+                            .into_iter()
+                            .collect(),
+                        &mut BTreeMap::new(),
+                        sorts,
+                    )?,
+                    None if old == new => new.clone(),
+                    None => match (old.clone(), new.clone(), self.schema.last().unwrap()) {
+                        (Value::Sort(old), Value::Sort(new), Type::Sort(s)) => {
+                            let (s, c) = sorts.get_mut(s).unwrap().union(old, new)?;
+                            changed |= c;
+                            Value::Sort(s)
+                        }
+                        _ => return Err(format!("{old} != {new} in {}", self.name)),
+                    },
+                };
+                if old == new {
+                    return Ok(changed);
+                }
+                self.live.set(id, false);
             }
-            self.remove_row(id);
         }
 
         // Append the new row
         let id = RowId(self.height());
+        self.live.set(id, true);
         for row in Table::index_rows(&row) {
-            self.indices.entry(row).or_default().insert(id);
+            self.indices.entry(row).or_default().push(id);
         }
         self.data.append(&mut row);
         Ok(true)
@@ -216,7 +215,7 @@ impl Table {
         dirty: &HashMap<String, HashSet<usize>>,
     ) -> Result<(), String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
-        let mut ids = BTreeSet::new();
+        let mut ids: BTreeSet<RowId> = BTreeSet::new();
         let mut row = vec![None; self.width()];
         for (column, sort) in self.schema.iter().enumerate() {
             if let Type::Sort(sort) = sort {
@@ -229,8 +228,8 @@ impl Table {
         }
         for id in ids {
             // We need an if statement here because previous inserts could have removed id
-            if self.get_ids(&row).contains(&id) {
-                self.remove_row(id);
+            if self.live.get(id) {
+                self.live.set(id, false);
                 self.insert(
                     get_row(&self.data, &self.schema, id)
                         .iter()
@@ -252,13 +251,14 @@ impl Table {
     /// Get the set of rows with specific values in specific columns. `None` means "don't care".
     pub fn rows(&self, row: &[Option<Value>], i: Iteration) -> impl Iterator<Item = &[Value]> {
         assert_eq!(self.width(), row.len());
+        let range = match i {
+            Iteration::Past => RowId(0)..self.prev.start,
+            Iteration::Prev => self.prev.clone(),
+            Iteration::All => RowId(0)..RowId(self.height()),
+        };
         self.get_ids(row)
-            .range(match i {
-                Iteration::Past => RowId(0)..self.prev.start,
-                Iteration::Prev => self.prev.clone(),
-                Iteration::All => RowId(0)..RowId(self.height()),
-            })
-            .map(|&id| get_row(&self.data, &self.schema, id))
+            .filter(move |&id| self.live.get(id) && range.contains(&id))
+            .map(|id| get_row(&self.data, &self.schema, id))
     }
 }
 
@@ -271,4 +271,32 @@ pub enum Iteration {
     Prev,
     /// Get all rows.
     All,
+}
+
+/// A subset of the rows in the table, implemented as a bitvector.
+#[derive(Clone, Default)]
+struct BitVec(Vec<BitVecBacking>);
+type BitVecBacking = usize;
+const BIT_VEC_BACKING_SIZE: usize = BitVecBacking::BITS as usize;
+
+impl BitVec {
+    fn get(&self, RowId(index): RowId) -> bool {
+        let i = index / BIT_VEC_BACKING_SIZE;
+        let j = index % BIT_VEC_BACKING_SIZE;
+        i < self.0.len() && (self.0[i] >> j) & 1 == 1
+    }
+
+    fn set(&mut self, RowId(index): RowId, value: bool) {
+        let i = index / BIT_VEC_BACKING_SIZE;
+        let j = index % BIT_VEC_BACKING_SIZE;
+        if i >= self.0.len() {
+            self.0.resize(i + 1, 0);
+        }
+        let mask = 1 << j;
+        if value {
+            self.0[i] |= mask;
+        } else {
+            self.0[i] &= !mask;
+        }
+    }
 }
