@@ -165,11 +165,11 @@ fn run_action(
 // Not a method on `Database` because we need to not borrow `rules`.
 fn rebuild(funcs: &mut Funcs, sorts: &mut Sorts) -> Result<(), String> {
     fixpoint(None, || {
-        let dirty: HashMap<String, HashSet<usize>> = sorts
+        let dirty: HashMap<String, Vec<usize>> = sorts
             .iter_mut()
             .map(|(sort, uf)| (sort.clone(), uf.dirty()))
             .collect();
-        if dirty.values().all(HashSet::is_empty) {
+        if dirty.values().all(Vec::is_empty) {
             Ok(false)
         } else {
             for table in funcs.values_mut() {

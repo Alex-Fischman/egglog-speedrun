@@ -12,7 +12,7 @@ pub struct UnionFind<'a, V> {
     /// The function to combine to `V`s.
     merge: Box<dyn Fn(V, V) -> Result<V, String> + 'a>,
     /// The set of keys that were canonical but aren't anymore.
-    dirty: HashSet<usize>,
+    dirty: Vec<usize>,
 }
 
 enum Node<V> {
@@ -27,7 +27,7 @@ impl Default for UnionFind<'static, ()> {
         UnionFind {
             trees: Vec::new(),
             merge: Box::new(|(), ()| Ok(())),
-            dirty: HashSet::default(),
+            dirty: Vec::new(),
         }
     }
 }
@@ -38,7 +38,7 @@ impl<'a, V> UnionFind<'a, V> {
         UnionFind {
             trees: Vec::new(),
             merge: Box::new(merge),
-            dirty: HashSet::default(),
+            dirty: Vec::new(),
         }
     }
 
@@ -81,19 +81,19 @@ impl<'a, V> UnionFind<'a, V> {
             Ordering::Less => {
                 self.trees[a] = Node::Child(b);
                 self.trees[b] = Node::Root(z, q);
-                self.dirty.insert(a);
+                self.dirty.push(a);
                 Ok((b, true))
             }
             Ordering::Greater => {
                 self.trees[a] = Node::Root(z, p);
                 self.trees[b] = Node::Child(a);
-                self.dirty.insert(b);
+                self.dirty.push(b);
                 Ok((a, true))
             }
             Ordering::Equal => {
                 self.trees[a] = Node::Root(z, p + 1);
                 self.trees[b] = Node::Child(a);
-                self.dirty.insert(b);
+                self.dirty.push(b);
                 Ok((a, true))
             }
         }
@@ -114,7 +114,7 @@ impl<'a, V> UnionFind<'a, V> {
 
     /// Get all of the keys that used to be canonical but aren't anymore,
     /// since the last time this function was called.
-    pub fn dirty(&mut self) -> HashSet<usize> {
+    pub fn dirty(&mut self) -> Vec<usize> {
         take(&mut self.dirty)
     }
 }

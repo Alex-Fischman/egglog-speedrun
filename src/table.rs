@@ -181,36 +181,33 @@ impl Table {
     pub fn rebuild(
         &mut self,
         sorts: &mut Sorts,
-        dirty: &HashMap<String, HashSet<usize>>,
+        dirty: &HashMap<String, Vec<usize>>,
     ) -> Result<(), String> {
         // For each row containing a dirty value, replace it with its canonicalized version.
-        let mut ids: Vec<RowId> = Vec::new();
-        for (column, sort) in self.schema.iter().enumerate() {
+        for (column, sort) in self.schema.clone().iter().enumerate() {
             if let Type::Sort(sort) = sort {
                 for value in &dirty[sort] {
-                    if let Some(vec) = self.columns[column].get(&Value::Sort(*value)) {
-                        ids.extend(vec);
+                    if let Some(vec) = self.columns[column].remove(&Value::Sort(*value)) {
+                        for id in vec {
+                            if self.live.get(id) {
+                                self.live.set(id, false);
+                                self.insert(
+                                    get_row(&self.data, &self.schema, id)
+                                        .iter()
+                                        .zip(&self.schema)
+                                        .map(|(v, t)| match (v, t) {
+                                            (Value::Sort(v), Type::Sort(s)) => {
+                                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
+                                            }
+                                            _ => v.clone(),
+                                        })
+                                        .collect(),
+                                    sorts,
+                                )?;
+                            }
+                        }
                     }
                 }
-            }
-        }
-        for id in ids {
-            // We need an if statement here because previous inserts could have removed id
-            if self.live.get(id) {
-                self.live.set(id, false);
-                self.insert(
-                    get_row(&self.data, &self.schema, id)
-                        .iter()
-                        .zip(&self.schema)
-                        .map(|(v, t)| match (v, t) {
-                            (Value::Sort(v), Type::Sort(s)) => {
-                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
-                            }
-                            _ => v.clone(),
-                        })
-                        .collect(),
-                    sorts,
-                )?;
             }
         }
         Ok(())
