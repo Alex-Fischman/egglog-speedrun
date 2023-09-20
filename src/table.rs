@@ -191,19 +191,13 @@ impl Table {
                         for id in vec {
                             if self.live.get(id) {
                                 self.live.set(id, false);
-                                self.insert(
-                                    get_row(&self.data, &self.schema, id)
-                                        .iter()
-                                        .zip(&self.schema)
-                                        .map(|(v, t)| match (v, t) {
-                                            (Value::Sort(v), Type::Sort(s)) => {
-                                                Value::Sort(sorts.get_mut(s).unwrap().find(*v))
-                                            }
-                                            _ => v.clone(),
-                                        })
-                                        .collect(),
-                                    sorts,
-                                )?;
+                                let mut row = get_row(&self.data, &self.schema, id).to_vec();
+                                for (v, t) in row.iter_mut().zip(&self.schema) {
+                                    if let (Value::Sort(v), Type::Sort(s)) = (v, t) {
+                                        *v = sorts.get_mut(s).unwrap().find(*v);
+                                    }
+                                }
+                                self.insert(row, sorts)?;
                             }
                         }
                     }
