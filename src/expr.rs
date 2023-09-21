@@ -101,7 +101,7 @@ impl Expr {
     ) -> Result<Value, String> {
         self.evaluate_private(vars, &mut |f, xs| {
             Ok(match funcs.get_mut(f) {
-                Some(func) => Some(func.get_mut(xs, sorts)?.0),
+                Some(func) => Some(func.get_mut(&xs, sorts)?.0),
                 None => None,
             })
         })?

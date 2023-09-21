@@ -18,12 +18,15 @@ pub mod table;
 pub mod unionfind;
 
 pub use crate::{database::*, expr::*, query::*, syntax::*, table::*, unionfind::*};
-pub use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+pub use hashbrown::raw::RawTable;
+pub use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet, FxHasher};
+pub use std::borrow::Borrow;
 pub use std::cmp::Ordering;
 pub use std::collections::{BTreeMap, BTreeSet};
 pub use std::env::args;
 pub use std::fmt::{Display, Formatter, Result as FmtResult};
 pub use std::fs::read_to_string;
+pub use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 pub use std::iter::{empty, once, Enumerate, FilterMap, Peekable};
 pub use std::mem::{replace, size_of, take};
 pub use std::ops::Range;

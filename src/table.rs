@@ -15,7 +15,7 @@ pub struct Table {
     /// The set of all live rows.
     live: BitVec,
     /// The functional index, over all input columns. Contains dead rows.
-    function: HashMap<Vec<Value>, RowId>,
+    func: RawTable<RowId>,
     /// The column indices, over each column. Contains dead rows.
     columns: Vec<HashMap<Value, Vec<RowId>>>,
     /// The rows that were added in the last iteration.
@@ -25,9 +25,21 @@ pub struct Table {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct RowId(usize);
 
-/// Returns the data in the given row.
-fn get_row<'a>(data: &'a [Value], schema: &[Type], id: RowId) -> &'a [Value] {
-    &data[id.0 * schema.len()..(id.0 + 1) * schema.len()]
+impl RowId {
+    /// Returns all of the values in a given row.
+    fn get_row<'a>(self, data: &'a [Value], schema: &[Type]) -> &'a [Value] {
+        &data[self.0 * schema.len()..(self.0 + 1) * schema.len()]
+    }
+
+    /// Returns the input values in a given row.
+    fn get_xs<'a>(self, data: &'a [Value], schema: &[Type]) -> &'a [Value] {
+        &data[self.0 * schema.len()..(self.0 + 1) * schema.len() - 1]
+    }
+
+    /// Returns the input values in a given row.
+    fn get_y<'a>(self, data: &'a [Value], schema: &[Type]) -> &'a Value {
+        &data[(self.0 + 1) * schema.len() - 1]
+    }
 }
 
 impl Table {
@@ -40,7 +52,7 @@ impl Table {
             merge,
             data: Vec::new(),
             live: BitVec::default(),
-            function: HashMap::default(),
+            func: RawTable::new(),
             prev: RowId(0)..RowId(0),
         }
     }
@@ -65,11 +77,29 @@ impl Table {
         self.prev = self.prev.end..RowId(self.height());
     }
 
+    fn hash(xs: &[Value]) -> u64 {
+        let mut hasher = BuildHasherDefault::<FxHasher>::default().build_hasher();
+        xs.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn get_id(&self, xs: &[Value]) -> Option<&RowId> {
+        self.func.get(Table::hash(xs), |&id| {
+            xs == id.get_xs(&self.data, &self.schema)
+        })
+    }
+
     /// Add a row to the table, merging if a row with the given inputs already exists.
     /// Returns true if the either the table or `sorts` was changed.
-    pub fn insert(&mut self, mut row: Vec<Value>, sorts: &mut Sorts) -> Result<bool, String> {
-        let types: Vec<Type> = row
+    pub fn insert(
+        &mut self,
+        xs: &[Value],
+        mut y: Value,
+        sorts: &mut Sorts,
+    ) -> Result<bool, String> {
+        let types: Vec<Type> = xs
             .iter()
+            .chain([&y])
             .enumerate()
             .map(|(i, v)| match v {
                 Value::Unit => Type::Unit,
@@ -99,10 +129,10 @@ impl Table {
         }
 
         // If there's a conflict, remove the old row
-        if let Some(&id) = self.function.get(&row[..row.len() - 1]) {
+        if let Some(&id) = self.get_id(xs) {
             if self.live.get(id) {
-                let old = get_row(&self.data, &self.schema, id).last().unwrap();
-                let new = row.last_mut().unwrap();
+                let old = id.get_y(&self.data, &self.schema);
+                let new = &mut y;
                 let mut changed = false;
                 *new = match &self.merge {
                     Some(expr) => expr.evaluate_mut(
@@ -132,14 +162,31 @@ impl Table {
         // Append the new row
         let id = RowId(self.height());
         self.live.set(id, true);
-        self.function.insert(row[..row.len() - 1].to_vec(), id);
-        for (column, value) in row.iter().enumerate() {
+        unsafe {
+            match self.func.find_or_find_insert_slot(
+                Table::hash(xs),
+                |&id| xs == id.get_xs(&self.data, &self.schema),
+                |&id| Table::hash(id.get_xs(&self.data, &self.schema)),
+            ) {
+                Ok(bucket) => {
+                    // Only replace dead rows
+                    assert!(!self.live.get(*bucket.as_ref()));
+                    *bucket.as_mut() = id;
+                }
+                Err(slot) => {
+                    // SAFETY: no mutation has occured since the call to find_or_find_insert_slot
+                    self.func.insert_in_slot(Table::hash(xs), slot, id);
+                }
+            }
+        }
+        for (column, value) in xs.iter().chain([&y]).enumerate() {
             self.columns[column]
                 .entry(value.clone())
                 .or_default()
                 .push(id);
         }
-        self.data.append(&mut row);
+        self.data.extend(xs.iter().cloned());
+        self.data.push(y);
         Ok(true)
     }
 
@@ -147,33 +194,32 @@ impl Table {
     /// output type is a sort, create a new sort element, add it to the table, and return it.
     pub fn get_mut(
         &mut self,
-        mut xs: Vec<Value>,
+        xs: &[Value],
         sorts: &mut Sorts,
     ) -> Result<(Option<Value>, bool), String> {
-        Ok(if let Some(y) = self.get_ref(&xs) {
-            (Some(y), false)
+        let changed = if self.get_id(xs).is_some() {
+            false
         } else {
-            let y = match self.schema.last().unwrap() {
-                Type::Sort(sort) => Value::Sort(sorts.get_mut(sort).unwrap().new_key(())),
-                Type::Unit => Value::Unit,
-                _ => return Ok((None, false)),
-            };
-            xs.push(y.clone());
-            self.insert(xs, sorts)?;
-            (Some(y), true)
-        })
+            self.insert(
+                xs,
+                match self.schema.last().unwrap() {
+                    Type::Sort(sort) => Value::Sort(sorts.get_mut(sort).unwrap().new_key(())),
+                    Type::Unit => Value::Unit,
+                    _ => return Ok((None, false)),
+                },
+                sorts,
+            )?;
+            true
+        };
+        Ok((self.get_ref(xs), changed))
     }
 
     /// Get the output in this table with the specific inputs in the input columns.
     /// This method never changes `self`; notably, it will not create new sort elements.
     pub fn get_ref(&self, xs: &[Value]) -> Option<Value> {
         assert_eq!(self.schema.len() - 1, xs.len());
-        self.function.get(xs).map(|&id| {
-            get_row(&self.data, &self.schema, id)
-                .last()
-                .unwrap()
-                .clone()
-        })
+        self.get_id(xs)
+            .map(|id| id.get_y(&self.data, &self.schema).clone())
     }
 
     /// Rebuild the indices so that each `Value::Sort` holds a canonical key.
@@ -191,13 +237,14 @@ impl Table {
                         for id in vec {
                             if self.live.get(id) {
                                 self.live.set(id, false);
-                                let mut row = get_row(&self.data, &self.schema, id).to_vec();
+                                let mut row = id.get_row(&self.data, &self.schema).to_vec();
                                 for (v, t) in row.iter_mut().zip(&self.schema) {
                                     if let (Value::Sort(v), Type::Sort(s)) = (v, t) {
                                         *v = sorts.get_mut(s).unwrap().find(*v);
                                     }
                                 }
-                                self.insert(row, sorts)?;
+                                let y = row.pop().unwrap();
+                                self.insert(&row, y, sorts)?;
                             }
                         }
                     }
@@ -216,29 +263,29 @@ impl Table {
     }
 
     /// Get all the live rows from an iteration.
-    pub fn rows(&self, i: Iteration) -> impl Iterator<Item = &[Value]> {
-        let range = self.range(i);
+    pub fn rows(&self, iteration: Iteration) -> impl Iterator<Item = &[Value]> {
+        let range = self.range(iteration);
         (range.start.0..range.end.0)
             .map(RowId) // Step is unstable
             .filter(|&id| self.live.get(id))
-            .map(|id| get_row(&self.data, &self.schema, id))
+            .map(|id| id.get_row(&self.data, &self.schema))
     }
 
     /// Get the live rows with a specific value in a specific column from an iteration.
     pub fn rows_with_value(
         &self,
-        i: Iteration,
+        iteration: Iteration,
         value: &Value,
         column: usize,
     ) -> impl Iterator<Item = &[Value]> {
-        let range = self.range(i);
+        let range = self.range(iteration);
         self.columns[column]
             .get(value)
             .into_iter()
             .flatten()
             .copied()
             .filter(move |&id| self.live.get(id) && range.contains(&id))
-            .map(|id| get_row(&self.data, &self.schema, id))
+            .map(|id| id.get_row(&self.data, &self.schema))
     }
 }
 

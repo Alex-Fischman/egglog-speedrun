@@ -130,15 +130,16 @@ fn run_action(
     // Run the action
     Ok(match action {
         Action::Insert(f, xs, y) => {
-            let row = xs
+            let xs = xs
                 .iter()
                 .chain([y])
                 .map(|x| x.evaluate_mut(vars, funcs, sorts))
                 .collect::<Result<Vec<_>, _>>()?;
+            let y = y.evaluate_mut(vars, funcs, sorts)?;
             funcs
                 .get_mut(f.as_str())
                 .ok_or_else(|| format!("unknown function {f}"))?
-                .insert(row, sorts)?
+                .insert(&xs, y, sorts)?
         }
         Action::GetMut(f, xs) => {
             let xs = xs
@@ -148,7 +149,7 @@ fn run_action(
             funcs
                 .get_mut(f.as_str())
                 .ok_or_else(|| format!("unknown function {f}"))?
-                .get_mut(xs, sorts)?
+                .get_mut(&xs, sorts)?
                 .1
         }
         Action::Union(x, y, s) => match (
