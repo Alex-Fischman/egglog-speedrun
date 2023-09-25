@@ -229,6 +229,9 @@ impl Table {
         sorts: &mut Sorts,
         dirty: &HashMap<String, Vec<usize>>,
     ) -> Result<(), String> {
+        // Loop-hoist the allocation for the new row.
+        // (I think the optimizer does this already but just to be safe I do it explicitly.)
+        let mut row = Vec::new();
         // For each row containing a dirty value, replace it with its canonicalized version.
         for (column, sort) in self.schema.clone().iter().enumerate() {
             if let Type::Sort(sort) = sort {
@@ -237,7 +240,8 @@ impl Table {
                         for id in vec {
                             if self.live.get(id) {
                                 self.live.set(id, false);
-                                let mut row = id.get_row(&self.data, &self.schema).to_vec();
+                                row.clear();
+                                row.extend_from_slice(id.get_row(&self.data, &self.schema));
                                 for (v, t) in row.iter_mut().zip(&self.schema) {
                                     if let (Value::Sort(v), Type::Sort(s)) = (v, t) {
                                         *v = sorts.get_mut(s).unwrap().find(*v);
