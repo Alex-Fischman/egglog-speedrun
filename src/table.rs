@@ -236,7 +236,6 @@ impl Table {
             row: &mut Vec<Value>,
         ) -> Result<(), String> {
             if table.live.get(id) {
-                table.live.set(id, false);
                 row.clear();
                 row.extend_from_slice(id.get_row(&table.data, &table.schema));
                 for (v, t) in row.iter_mut().zip(&table.schema) {
@@ -244,8 +243,11 @@ impl Table {
                         *v = sorts.get_mut(s).unwrap().find(*v);
                     }
                 }
-                let y = row.pop().unwrap();
-                table.insert(row, y, sorts)?;
+                if id.get_row(&table.data, &table.schema) != row {
+                    let y = row.pop().unwrap();
+                    table.live.set(id, false);
+                    table.insert(row, y, sorts)?;
+                }
             }
             Ok(())
         }
@@ -253,13 +255,29 @@ impl Table {
         // Loop-hoist the allocation for the new row.
         // (I think the optimizer does this already but just to be safe I do it explicitly.)
         let mut row = Vec::new();
-        // For each row containing a dirty value, replace it with its canonicalized version.
-        for (column, sort) in self.schema.clone().iter().enumerate() {
-            if let Type::Sort(sort) = sort {
-                for value in &dirty[sort] {
-                    if let Some(vec) = self.columns[column].remove(&Value::Sort(*value)) {
-                        for id in vec {
-                            rebuild_row(id, self, sorts, &mut row)?;
+
+        // Heuristic for whether or not to use the dirty sets.
+        // We want to not use the dirty sets if most rows contain a dirty element.
+        let non_incremental = self.height()
+            < 2 * dirty
+                .iter()
+                .filter(|(sort, _)| self.schema.contains(&Type::Sort((**sort).clone())))
+                .map(|(_, rows)| rows.len())
+                .sum::<usize>();
+        if non_incremental {
+            // Rebuild all rows.
+            for id in (0..self.height()).map(RowId) {
+                rebuild_row(id, self, sorts, &mut row)?;
+            }
+        } else {
+            // For each row containing a dirty value, replace it with its canonicalized version.
+            for (column, sort) in self.schema.clone().iter().enumerate() {
+                if let Type::Sort(sort) = sort {
+                    for value in &dirty[sort] {
+                        if let Some(vec) = self.columns[column].remove(&Value::Sort(*value)) {
+                            for id in vec {
+                                rebuild_row(id, self, sorts, &mut row)?;
+                            }
                         }
                     }
                 }
