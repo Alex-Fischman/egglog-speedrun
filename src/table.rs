@@ -229,6 +229,27 @@ impl Table {
         sorts: &mut Sorts,
         dirty: &HashMap<String, Vec<usize>>,
     ) -> Result<(), String> {
+        fn rebuild_row(
+            id: RowId,
+            table: &mut Table,
+            sorts: &mut Sorts,
+            row: &mut Vec<Value>,
+        ) -> Result<(), String> {
+            if table.live.get(id) {
+                table.live.set(id, false);
+                row.clear();
+                row.extend_from_slice(id.get_row(&table.data, &table.schema));
+                for (v, t) in row.iter_mut().zip(&table.schema) {
+                    if let (Value::Sort(v), Type::Sort(s)) = (v, t) {
+                        *v = sorts.get_mut(s).unwrap().find(*v);
+                    }
+                }
+                let y = row.pop().unwrap();
+                table.insert(row, y, sorts)?;
+            }
+            Ok(())
+        }
+
         // Loop-hoist the allocation for the new row.
         // (I think the optimizer does this already but just to be safe I do it explicitly.)
         let mut row = Vec::new();
@@ -238,18 +259,7 @@ impl Table {
                 for value in &dirty[sort] {
                     if let Some(vec) = self.columns[column].remove(&Value::Sort(*value)) {
                         for id in vec {
-                            if self.live.get(id) {
-                                self.live.set(id, false);
-                                row.clear();
-                                row.extend_from_slice(id.get_row(&self.data, &self.schema));
-                                for (v, t) in row.iter_mut().zip(&self.schema) {
-                                    if let (Value::Sort(v), Type::Sort(s)) = (v, t) {
-                                        *v = sorts.get_mut(s).unwrap().find(*v);
-                                    }
-                                }
-                                let y = row.pop().unwrap();
-                                self.insert(&row, y, sorts)?;
-                            }
+                            rebuild_row(id, self, sorts, &mut row)?;
                         }
                     }
                 }
