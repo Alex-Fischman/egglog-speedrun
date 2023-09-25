@@ -97,37 +97,6 @@ impl Table {
         mut y: Value,
         sorts: &mut Sorts,
     ) -> Result<bool, String> {
-        let types: Vec<Type> = xs
-            .iter()
-            .chain([&y])
-            .enumerate()
-            .map(|(i, v)| match v {
-                Value::Unit => Type::Unit,
-                Value::Int(_) => Type::Int,
-                Value::String(_) => Type::String,
-                Value::Sort(_) => Type::Sort(match &self.schema[i] {
-                    Type::Sort(s) => s.clone(),
-                    _ => String::new(),
-                }),
-            })
-            .collect();
-        if self.schema != types {
-            return Err(format!(
-                "expected [{}], found [{}] for {}",
-                self.schema
-                    .iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                types
-                    .iter()
-                    .map(|x| format!("{x}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                self.name,
-            ));
-        }
-
         // If there's a conflict, remove the old row
         if let Some(&id) = self.get_id(xs) {
             if self.live.get(id) {
